@@ -1,0 +1,20 @@
+{
+  "name": "asp-portal-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "API REST du portail ASP — seule porte d'accès à PostgreSQL",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "compression": "1.7.5",
+    "cors": "2.8.5",
+    "express": "4.21.2",
+    "pg": "8.13.1"
+  }
+}
