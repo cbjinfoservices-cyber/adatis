@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import type { AuthEvent } from '@/utils/auth';
+import type { AuthEvent, AuthMode } from '@/utils/auth';
 
 const KIND_STYLES: Record<string, { icon: string; className: string; key: string }> = {
   login_ok: { icon: 'ri-shield-check-line', className: 'text-primary-700 dark:text-primary-300 bg-primary-500/10', key: 'auth_event_login_ok' },
@@ -10,7 +10,7 @@ const KIND_STYLES: Record<string, { icon: string; className: string; key: string
 
 export default function AuthEventsCard({
   events, loading, mode,
-}: { events: AuthEvent[]; loading: boolean; mode: 'awx' | 'disabled' }) {
+}: { events: AuthEvent[]; loading: boolean; mode: AuthMode }) {
   const { t, i18n } = useTranslation();
 
   return (

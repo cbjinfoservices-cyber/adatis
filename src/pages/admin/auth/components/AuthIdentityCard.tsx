@@ -1,11 +1,11 @@
 import { useTranslation } from 'react-i18next';
-import { roleLabelKey, type AwxIdentity, type PortalRole } from '@/utils/auth';
+import { roleLabelKey, type AuthMode, type AwxIdentity, type PortalRole } from '@/utils/auth';
 
 type Props = {
   identity: AwxIdentity | null;
   loading: boolean;
   error: boolean;
-  mode: 'awx' | 'disabled';
+  mode: AuthMode;
   role?: PortalRole | null;
   onReload: () => void;
   onRefreshToken: () => void;
