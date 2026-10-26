@@ -21,7 +21,7 @@ const WORKFLOWS = [{ id: 20, name: 'Provisionner une application', users: ['admi
 
 const tokenFor = (username) => `tok-${username}`;
 
-function startMockAscender() {
+function startMockAscender(port = 0) {
   const state = { nextUser: 'admin', down: false, jobs: new Map(), nextJob: 100, launches: [] };
 
   const send = (res, status, body) => {
@@ -119,7 +119,7 @@ function startMockAscender() {
   });
 
   return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(port, '127.0.0.1', () => {
       const { port } = server.address();
       resolve({
         url: `http://127.0.0.1:${port}`,

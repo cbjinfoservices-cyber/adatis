@@ -156,14 +156,15 @@ kubectl -n asp-portal exec deploy/asp-api -- wget -qO- localhost:8080/api/system
 | `DOMAIN` | vide | hôte public, active l'Ingress + TLS |
 | `BASE_PATH` | `/` | chemin de base du SPA au build |
 | `API_URL` | `/api` | URL de l'API vue par le navigateur |
-| `ALLOWED_ORIGINS` | `*` | origines CORS autorisées par l'API |
+| `ALLOWED_ORIGINS` | vide | origines tierces autorisées par l'API (vide : même origine via l'Ingress) |
 | `DB_NAME` / `DB_USER` | `asp_portal` / `asp` | identifiants de la base |
 | `FORCE_DB_PASSWORD` | — | impose le mot de passe (sinon généré puis réutilisé) |
 | `ALERT_EMAIL_TO` | vide | destinataire par défaut des alertes (modifiable ensuite dans la page Système) |
 | `ALERT_EMAIL_FROM` | `alertes@<RESEND_FROM_DOMAIN>` | expéditeur des alertes |
 | `RESEND_API_KEY` | vide | active l'envoi réel des alertes (secret `asp-alerts`) |
 | `PORTAL_URL` | `https://${DOMAIN}` | lien repris dans les emails d'alerte et retour après connexion |
-| `AUTH_MODE` | `disabled` | `awx` impose le SSO AWX (reste `disabled` si la config est incomplète) |
+| `AUTH_MODE` | `disabled` | `awx` impose le SSO Ascender ; portail fermé (503) si la config est incomplète. `disabled` : sans authentification, développement uniquement |
+| `TOKEN_ENCRYPTION_KEY` | conservée ou générée | clé AES-256 (32 octets base64) des jetons Ascender en base, stockée dans `asp-auth` |
 | `AWX_BASE_URL` | vide | URL de base de l'AWX, ex. `https://awx.acme.fr` |
 | `AWX_CLIENT_ID` | vide | client id de l'application OAuth2 AWX |
 | `AWX_CLIENT_SECRET` | vide | client secret (stocké dans le secret `asp-auth`) |
@@ -172,11 +173,12 @@ kubectl -n asp-portal exec deploy/asp-api -- wget -qO- localhost:8080/api/system
 | `AWX_REDIRECT_URI` | `${PORTAL_URL}/api/auth/callback` | URL de retour à déclarer dans AWX |
 | `SESSION_TTL_HOURS` | `12` | durée de vie de la session portail (cookie glissant) |
 
-## 3bis. Authentification SSO AWX
+## 3bis. Authentification SSO Ascender (AWX)
 
-Le portail peut déléguer toute l'authentification à AWX via OAuth2 (Authorization Code).
-Le navigateur ne reçoit qu'un cookie de session `httpOnly` ; les jetons AWX restent en base,
-côté serveur, et servent ensuite à lancer les jobs au nom de l'utilisateur.
+Le portail délègue toute l'authentification à Ascender (ou à tout AWX) via OAuth2
+(Authorization Code). Le navigateur ne reçoit qu'un cookie de session `httpOnly` ; les
+jetons restent en base, chiffrés (AES-256-GCM), et servent à lancer les jobs au nom de
+l'utilisateur.
 
 ### Créer l'application OAuth2 dans AWX
 
@@ -195,9 +197,11 @@ AWX_CLIENT_SECRET=<client secret> \
 DOMAIN=portal.acme.fr ./deploy/deploy.sh
 ```
 
-Le script crée le secret `asp-auth` (`AWX_CLIENT_SECRET`, `AWX_REDIRECT_URI`).
+Le script crée le secret `asp-auth` (`AWX_CLIENT_SECRET`, `AWX_REDIRECT_URI`,
+`TOKEN_ENCRYPTION_KEY`). La clé de chiffrement existante est conservée d'un déploiement
+à l'autre ; la changer déconnecte simplement les utilisateurs.
 Si `AUTH_MODE=awx` mais que la configuration est incomplète, le script avertit et
-l'API **reste ouverte** : le portail n'est jamais verrouillé par erreur.
+l'API **reste fermée** (503) : le portail ne s'ouvre jamais sans authentification par erreur.
 
 ### Rôles
 

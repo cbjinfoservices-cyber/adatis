@@ -76,11 +76,13 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@": resolve(__dirname, "./src"),
+      "@": resolve(import.meta.dirname, "./src"),
     },
   },
   server: {
     port: 3000,
     host: "0.0.0.0",
+    // Développement : l'API est servie sur la même origine, comme derrière l'Ingress.
+    proxy: { "/api": process.env.VITE_API_PROXY || "http://127.0.0.1:8080" },
   },
 });

@@ -151,6 +151,8 @@ function start() {
 }
 
 // Importé par les tests : l'application est exportée sans écouter de port.
+// scripts/dev-local.mjs démarre le serveur via app.start().
 if (require.main === module) start();
 
 module.exports = app;
+module.exports.start = start;

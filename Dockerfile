@@ -1,5 +1,5 @@
 # --- Étape 1 : build du SPA ---
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 ENV NODE_ENV=development
 
