@@ -1,0 +1,9 @@
+node_modules/
+out/
+dist/
+*.log
+.env
+.env.*
+auto-imports.d.ts
+*.tsbuildinfo
+.pgdata/

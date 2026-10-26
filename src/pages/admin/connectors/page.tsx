@@ -11,7 +11,7 @@ import ImportConnectorsModal from '@/pages/admin/connectors/components/ImportCon
 import AdminTabs from '@/pages/admin/components/AdminTabs';
 import ReadOnlyNotice from '@/components/base/ReadOnlyNotice';
 import useReadOnly from '@/hooks/useReadOnly';
-import { api } from '@/utils/api';
+import { api, ApiError } from '@/utils/api';
 import { loadStore, reloadStore, useStore } from '@/utils/store';
 import {
   CONNECTOR_SORTS, HEALTH_FILTERS, configBundleFileName, configEntryMatches, configSelectionFileName, downloadJson,
@@ -102,9 +102,28 @@ export default function ConnectorsPage() {
     jobs: items.reduce((acc, c) => acc + c.jobs24h, 0),
   }), [items]);
 
+  /** Connecteur Ascender : l'API pingue réellement /api/v2/ping/. */
+  const testManaged = async (connector: Connector): Promise<ConnectorTestEntry | null> => {
+    try {
+      const updated = await api.post<Connector>(`/connectors/${connector.id}/test`);
+      await reloadStore();
+      const entry = updated.tests[0] || null;
+      if (entry?.ok) notify(t('admin_test_ok', { name: connector.name, ms: entry.latency }));
+      else notify(t('admin_test_failed', { name: connector.name, error: entry?.error || '' }));
+      return entry;
+    } catch {
+      notifyFailure();
+      return null;
+    }
+  };
+
   const testConnector = async (connector: Connector) => {
     setTestingId(connector.id);
     try {
+      if (connector.managed) {
+        await testManaged(connector);
+        return;
+      }
       if (connector.configured === false) {
         await api.post(`/connectors/${connector.id}/test`, {
           ok: false, latency: 0, error: '401 Unauthorized - missing access token',
@@ -172,11 +191,14 @@ export default function ConnectorsPage() {
   const syncConnector = async (connector: Connector) => {
     setSyncingId(connector.id);
     try {
-      await api.post(`/connectors/${connector.id}/sync`);
+      const updated = await api.post<Connector>(`/connectors/${connector.id}/sync`);
       await reloadStore();
-      notify(t('admin_sync_ok', { name: connector.name, count: connector.catalog.length }));
-    } catch {
-      notifyFailure();
+      notify(t('admin_sync_ok', { name: connector.name, count: updated.catalog.length }));
+    } catch (err) {
+      const code = err instanceof ApiError ? (err.detail as { error?: string } | null)?.error : '';
+      if (code === 'ascender_session_required') notify(t('admin_sync_session_required', { name: connector.name }));
+      else if (code === 'ascender_unreachable') notify(t('admin_sync_unreachable', { name: connector.name }));
+      else notifyFailure();
     } finally {
       setSyncingId(null);
     }
@@ -191,7 +213,9 @@ export default function ConnectorsPage() {
     setSyncingAll(true);
     try {
       for (const connector of eligible) {
-        await api.post(`/connectors/${connector.id}/sync`);
+        // Ascender exige une session SSO : son échec ne bloque pas les autres.
+        if (connector.managed) await api.post(`/connectors/${connector.id}/sync`).catch(() => null);
+        else await api.post(`/connectors/${connector.id}/sync`);
       }
       await reloadStore();
       notify(t('admin_sync_all_ok', { count: eligible.length }));
@@ -663,6 +687,7 @@ export default function ConnectorsPage() {
                 onToggleMap={toggleMap}
                 onUpdateEndpoint={(endpoint) => updateEndpoint(detailConnector.id, endpoint)}
                 onEndpointTested={(endpoint, result) => handleEndpointTested(detailConnector.id, endpoint, result)}
+                onTestManaged={() => testManaged(detailConnector)}
                 onRename={(name) => renameConnector(detailConnector.id, name)}
                 onNotes={(notes) => updateNotes(detailConnector.id, notes)}
                 onDuplicate={() => duplicateConnector(detailConnector)}

@@ -72,7 +72,7 @@ CREATE TABLE services (
   estimated_minutes integer NOT NULL DEFAULT 5 CHECK (estimated_minutes >= 0),
   popularity        integer NOT NULL DEFAULT 0 CHECK (popularity >= 0),
   form_id           text REFERENCES form_schemas(id) ON DELETE SET NULL,
-  tags              text[] NOT NULL DEFAULT ''
+  tags              text[] NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX services_project_idx  ON services (project_id);
@@ -132,7 +132,7 @@ CREATE TABLE requests (
   approval_state  text NOT NULL DEFAULT 'not_required'
                   CHECK (approval_state IN ('not_required','pending','granted','rejected')),
   business_type   text NOT NULL DEFAULT 'custom',
-  payload         jsonb NOT NULL DEFAULT ''::jsonb
+  payload         jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
 CREATE INDEX requests_created_idx  ON requests (created_at DESC);-- Référence lisible des nouvelles demandes (REQ-<année>-<séquence>)
@@ -238,7 +238,7 @@ CREATE TABLE connectors (
   success_rate        numeric(5,2) NOT NULL DEFAULT 0,
   scope               text NOT NULL DEFAULT 'tenant' CHECK (scope IN ('tenant','platform')),
   retest_required_at  timestamptz,
-  capabilities        text[] NOT NULL DEFAULT '',
+  capabilities        text[] NOT NULL DEFAULT '{}',
   created_at          timestamptz NOT NULL DEFAULT now()
 );
 

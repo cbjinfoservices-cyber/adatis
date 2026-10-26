@@ -125,7 +125,7 @@ export default function UserMenu() {
                 {t(roleLabelKey(user.role))}
               </span>
               <span className="font-label text-[10px] px-2 py-0.5 rounded-full bg-background-200 text-foreground-700">
-                {t('auth_login_provider', { provider: 'AWX' })}
+                {t('auth_login_provider', { provider: 'Ascender' })}
               </span>
             </div>
           </div>

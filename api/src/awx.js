@@ -74,7 +74,7 @@ const postForm = async (url, form, clientId, clientSecret) => {
 
   if (!response.ok) {
     const detail = payload?.error_description || payload?.error || payload?.detail || text.slice(0, 200);
-    const error = new Error(`AWX a refusé la requête OAuth (${response.status}) : ${detail || 'sans détail'}`);
+    const error = new Error(`Ascender a refusé la requête OAuth (${response.status}) : ${detail || 'sans détail'}`);
     error.status = response.status;
     error.awx = payload;
     throw error;
@@ -143,7 +143,7 @@ const apiRequest = async (path, accessToken, { method = 'GET', body } = {}) => {
   }
   if (!response.ok) {
     const detail = payload?.detail || payload?.error || text.slice(0, 200);
-    const error = new Error(`AWX a répondu ${response.status} sur ${path}${detail ? ` : ${detail}` : ''}`);
+    const error = new Error(`Ascender a répondu ${response.status} sur ${path}${detail ? ` : ${detail}` : ''}`);
     error.status = response.status;
     error.awx = payload;
     throw error;
@@ -152,6 +152,38 @@ const apiRequest = async (path, accessToken, { method = 'GET', body } = {}) => {
 };
 
 const apiGet = (path, accessToken) => apiRequest(path, accessToken);
+
+/**
+ * Sonde de disponibilité : /api/v2/ping/ répond sans jeton sur AWX comme sur
+ * Ascender. Sert au test réel du connecteur Ascender.
+ */
+const ping = async () => {
+  const config = readConfig();
+  if (!config.baseUrl) throw new Error('AWX_BASE_URL non configuré');
+  const started = Date.now();
+  const response = await fetch(`${config.baseUrl}/api/v2/ping/`, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(timeoutMs()),
+  });
+  const latencyMs = Date.now() - started;
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = null;
+  }
+  if (!response.ok) {
+    const error = new Error(`Ascender a répondu ${response.status} sur /api/v2/ping/`);
+    error.status = response.status;
+    throw error;
+  }
+  return {
+    latencyMs,
+    version: String(payload?.version || ''),
+    activeNode: String(payload?.active_node || ''),
+  };
+};
 
 /** Statut AWX -> statut portail (null = à ignorer). */
 const JOB_STATUS_MAP = {
@@ -172,7 +204,7 @@ const launchJobTemplate = async ({
   templateId, accessToken, extraVars = {}, limit = '',
 }) => {
   const id = Number(templateId);
-  if (!Number.isInteger(id) || id <= 0) throw new Error('Modèle de job AWX invalide');
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Modèle de job Ascender invalide');
 
   const payload = await apiRequest(`/api/v2/job_templates/${id}/launch/`, accessToken, {
     method: 'POST',
@@ -184,7 +216,7 @@ const launchJobTemplate = async ({
 
   const jobId = Number(payload?.job ?? payload?.id);
   if (!Number.isInteger(jobId) || jobId <= 0) {
-    const error = new Error("AWX n'a pas renvoyé d'identifiant de job");
+    const error = new Error("Ascender n'a pas renvoyé d'identifiant de job");
     error.status = 502;
     throw error;
   }
@@ -194,7 +226,7 @@ const launchJobTemplate = async ({
 /** Lance un workflow template AVEC le jeton de l'utilisateur. */
 const launchWorkflowTemplate = async ({ templateId, accessToken, extraVars = {} }) => {
   const id = Number(templateId);
-  if (!Number.isInteger(id) || id <= 0) throw new Error('Modèle de workflow AWX invalide');
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Modèle de workflow Ascender invalide');
 
   const payload = await apiRequest(`/api/v2/workflow_job_templates/${id}/launch/`, accessToken, {
     method: 'POST',
@@ -203,7 +235,7 @@ const launchWorkflowTemplate = async ({ templateId, accessToken, extraVars = {} 
 
   const workflowJobId = Number(payload?.workflow_job ?? payload?.id);
   if (!Number.isInteger(workflowJobId) || workflowJobId <= 0) {
-    const error = new Error("AWX n'a pas renvoyé d'identifiant de workflow");
+    const error = new Error("Ascender n'a pas renvoyé d'identifiant de workflow");
     error.status = 502;
     throw error;
   }
@@ -399,10 +431,34 @@ const summarizeTeams = (me) => {
     .filter((team) => team.name);
 };
 
+/** Liste paginée de l'utilisateur (organisations ou équipes), 200 max. */
+const listForUser = async (userId, accessToken, resource) => {
+  if (!userId) return [];
+  try {
+    const payload = await apiGet(`/api/v2/users/${Number(userId)}/${resource}/?page_size=200`, accessToken);
+    return payload?.results || [];
+  } catch {
+    return [];
+  }
+};
+
 const fetchIdentity = async (accessToken) => {
-  const me = await apiGet('/api/v2/me/', accessToken);
-  const organizations = summarizeOrganizations(me);
-  const teams = summarizeTeams(me);
+  // AWX et Ascender renvoient /api/v2/me/ sous forme de liste paginée.
+  const payload = await apiGet('/api/v2/me/', accessToken);
+  const me = Array.isArray(payload?.results) ? payload.results[0] || {} : payload || {};
+
+  // Organisations et équipes : summary_fields quand ils existent, sinon les
+  // sous-ressources de l'utilisateur.
+  let organizations = summarizeOrganizations(me);
+  let teams = summarizeTeams(me);
+  if (!me?.summary_fields?.organizations) {
+    const results = await listForUser(me?.id, accessToken, 'organizations');
+    organizations = summarizeOrganizations({ summary_fields: { organizations: { results } } });
+  }
+  if (!me?.summary_fields?.teams) {
+    const results = await listForUser(me?.id, accessToken, 'teams');
+    teams = summarizeTeams({ summary_fields: { teams: { results } } });
+  }
   return {
     awxUserId: Number(me?.id) || null,
     username: String(me?.username || '').trim(),
@@ -424,6 +480,7 @@ module.exports = {
   refreshAccessToken,
   fetchIdentity,
   adminUsernames,
+  ping,
   launchJobTemplate,
   launchWorkflowTemplate,
   fetchJob,

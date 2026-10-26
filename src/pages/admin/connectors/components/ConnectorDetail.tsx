@@ -10,7 +10,7 @@ import type { BatchTestEntry } from '@/utils/store';
 
 export default function ConnectorDetail({
   connector, retestCount, testingAll, onTestAllRetest, batchHistory,
-  onToggleMap, onUpdateEndpoint, onEndpointTested, onRename, onNotes, onDuplicate, onNotify, onDelete,
+  onToggleMap, onUpdateEndpoint, onEndpointTested, onTestManaged, onRename, onNotes, onDuplicate, onNotify, onDelete,
 }: {
   connector: Connector;
   retestCount: number;
@@ -20,6 +20,8 @@ export default function ConnectorDetail({
   onToggleMap: (itemId: string) => void;
   onUpdateEndpoint: (endpoint: string) => void;
   onEndpointTested: (endpoint: string, result: ConnectorTestEntry) => void;
+  /** Test réel côté API (connecteur Ascender) : renvoie l'entrée enregistrée. */
+  onTestManaged: () => Promise<ConnectorTestEntry | null>;
   onRename: (name: string) => void;
   onNotes: (notes: string) => void;
   onDuplicate: () => void;
@@ -28,6 +30,7 @@ export default function ConnectorDetail({
 }) {
   const { t, i18n } = useTranslation();
   const readOnly = useReadOnly();
+  const managed = Boolean(connector.managed);
   const lang = i18n.language;
   const health = HEALTH_STYLE[connector.health];
 
@@ -126,8 +129,16 @@ export default function ConnectorDetail({
     onRename(next);
   };
 
-  const testEndpoint = () => {
+  const testEndpoint = async () => {
     if (readOnly) return;
+    if (managed) {
+      setTestingEndpoint(true);
+      setTestResult(null);
+      const entry = await onTestManaged();
+      setTestingEndpoint(false);
+      if (entry) setTestResult({ ok: entry.ok, latency: entry.latency, error: entry.error });
+      return;
+    }
     const next = endpoint.trim();
     if (!endpointIsValid(next)) {
       setEndpointError(t('admin_endpoint_invalid'));
@@ -250,24 +261,35 @@ export default function ConnectorDetail({
           <i className={health.icon} />
           {t(`admin_health_${connector.health}`)}
         </span>
-        <button
-          type="button"
-          onClick={onDuplicate}
-          disabled={readOnly}
-          title={readOnly ? t('admin_readonly_action') : t('admin_duplicate_aria', { name: connector.name })}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-background-300 text-[11px] font-medium text-foreground-700 whitespace-nowrap cursor-pointer hover:bg-background-100 hover:text-foreground-900"
-        >
-          <i className="ri-file-copy-line" />{t('admin_duplicate')}
-        </button>
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={readOnly}
-          title={readOnly ? t('admin_readonly_action') : t('admin_delete_aria', { name: connector.name })}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-background-300 text-[11px] font-medium text-foreground-700 whitespace-nowrap cursor-pointer hover:bg-accent-100 hover:text-accent-900 hover:border-accent-300"
-        >
-          <i className="ri-delete-bin-6-line" />{t('admin_delete')}
-        </button>
+        {managed ? (
+          <span
+            title={t('admin_managed_hint')}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-background-200 font-label text-[11px] text-foreground-700 whitespace-nowrap"
+          >
+            <i className="ri-lock-line" />{t('admin_managed_badge')}
+          </span>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={onDuplicate}
+              disabled={readOnly}
+              title={readOnly ? t('admin_readonly_action') : t('admin_duplicate_aria', { name: connector.name })}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-background-300 text-[11px] font-medium text-foreground-700 whitespace-nowrap cursor-pointer hover:bg-background-100 hover:text-foreground-900"
+            >
+              <i className="ri-file-copy-line" />{t('admin_duplicate')}
+            </button>
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={readOnly}
+              title={readOnly ? t('admin_readonly_action') : t('admin_delete_aria', { name: connector.name })}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-background-300 text-[11px] font-medium text-foreground-700 whitespace-nowrap cursor-pointer hover:bg-accent-100 hover:text-accent-900 hover:border-accent-300"
+            >
+              <i className="ri-delete-bin-6-line" />{t('admin_delete')}
+            </button>
+          </>
+        )}
       </header>
 
       {connector.retestRequiredAt && (
@@ -360,34 +382,41 @@ export default function ConnectorDetail({
                 </span>
               )}
             </div>
-            <p className="mt-0.5 text-[11px] text-foreground-600">{t('admin_endpoint_hint')}</p>
+            <p className="mt-0.5 text-[11px] text-foreground-600">
+              {managed ? t('admin_managed_endpoint_hint') : t('admin_endpoint_hint')}
+            </p>
             <div className="mt-2 space-y-2">
               <input
                 id={`endpoint-${connector.id}`}
                 type="url"
                 dir="ltr"
                 value={endpoint}
+                readOnly={managed}
                 placeholder={t('admin_endpoint_placeholder')}
                 onChange={(e) => { setEndpoint(e.target.value); setEndpointError(null); setTestResult(null); }}
-                className="block w-full min-w-0 box-border px-3 py-2 rounded-lg border border-background-300 bg-background-50 font-label text-[12px] text-foreground-950 focus:outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/30"
+                className="block w-full min-w-0 box-border px-3 py-2 rounded-lg border border-background-300 bg-background-50 font-label text-[12px] text-foreground-950 read-only:bg-background-100 read-only:text-foreground-700 focus:outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/30"
               />
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={saveEndpoint}
-                  disabled={!endpointDirty}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-background-300 bg-background-50 text-xs font-semibold text-foreground-800 whitespace-nowrap cursor-pointer hover:bg-background-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <i className="ri-save-3-line" />{t('admin_endpoint_save')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmReset(true)}
-                  disabled={endpointIsOriginal(connector, endpoint) || confirmReset}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-background-300 bg-background-50 text-xs font-semibold text-foreground-800 whitespace-nowrap cursor-pointer hover:bg-background-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <i className="ri-arrow-go-back-line" />{t('admin_endpoint_reset')}
-                </button>
+                {!managed && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={saveEndpoint}
+                      disabled={!endpointDirty}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-background-300 bg-background-50 text-xs font-semibold text-foreground-800 whitespace-nowrap cursor-pointer hover:bg-background-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <i className="ri-save-3-line" />{t('admin_endpoint_save')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmReset(true)}
+                      disabled={endpointIsOriginal(connector, endpoint) || confirmReset}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-background-300 bg-background-50 text-xs font-semibold text-foreground-800 whitespace-nowrap cursor-pointer hover:bg-background-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <i className="ri-arrow-go-back-line" />{t('admin_endpoint_reset')}
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
                   onClick={testEndpoint}

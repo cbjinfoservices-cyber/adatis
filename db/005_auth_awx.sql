@@ -17,8 +17,8 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS awx_user_id integer;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS awx_username text NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider text NOT NULL DEFAULT 'local';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at timestamptz;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS awx_organizations text[] NOT NULL DEFAULT '';
-ALTER TABLE users ADD COLUMN IF NOT EXISTS awx_teams text[] NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS awx_organizations text[] NOT NULL DEFAULT '{}';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS awx_teams text[] NOT NULL DEFAULT '{}';
 
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check

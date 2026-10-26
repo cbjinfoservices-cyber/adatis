@@ -140,6 +140,7 @@ function connector(row, related = {}) {
     version: row.version,
     notes: row.notes,
     configured: row.configured,
+    managed: Boolean(row.managed),
     health: row.health,
     latencyMs: num(row.latency_ms),
     uptime: num(row.uptime),

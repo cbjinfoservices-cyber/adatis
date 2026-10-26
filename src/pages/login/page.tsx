@@ -214,7 +214,7 @@ export default function LoginPage() {
               {config?.mode === 'awx' && (
                 <span className="inline-flex items-center gap-1.5 font-label text-[10px] uppercase tracking-widest text-foreground-500">
                   <span className="w-1.5 h-1.5 rounded-full bg-primary-500" aria-hidden="true" />
-                  {t('auth_login_provider', { provider: 'AWX' })}
+                  {t('auth_login_provider', { provider: 'Ascender' })}
                 </span>
               )}
             </div>

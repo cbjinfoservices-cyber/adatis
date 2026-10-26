@@ -2,7 +2,7 @@ import type { I18nText } from '@/types/catalog';
 
 export type ConnectorKind =
   | 'ascender' | 'jenkins' | 'terraform' | 'gitlab' | 'azuredevops'
-  | 'argocd' | 'rundeck' | 'servicenow' | 'ansible';
+  | 'argocd' | 'rundeck' | 'servicenow';
 
 export type Health = 'healthy' | 'degraded' | 'down' | 'pending';
 export type MapStatus = 'mapped' | 'review' | 'ignored';
@@ -50,6 +50,8 @@ export interface Connector {
   notes?: string;
   retestRequiredAt?: string | null;
   configured?: boolean;
+  /** Connecteur Ascender : configuré par les variables AWX_*, tests réels. */
+  managed?: boolean;
   health: Health;
   latencyMs: number;
   uptime: number;
@@ -102,7 +104,6 @@ export const KIND_ICON: Record<ConnectorKind, string> = {
   argocd: 'ri-node-tree',
   rundeck: 'ri-terminal-box-line',
   servicenow: 'ri-ticket-2-line',
-  ansible: 'ri-settings-5-line',
 };
 
 export const endpointIsValid = (value: string) => {

@@ -105,6 +105,7 @@ Portail Self-Service SaaS multi-tenant et white label permettant aux utilisateur
 - Phase 11 terminée : authentification SSO AWX (OAuth2), sessions serveur, rôles issus des organisations/équipes AWX, page de connexion et administration de l'authentification
 - Phase 12 terminée : exécution par job/workflow template AWX avec le jeton utilisateur, suivi agrégé `/awx`, rafraîchissement automatique des jobs en cours, filtrage RBAC du catalogue et administration en lecture seule pour les approbateurs
 - Phase 13 terminée : sélection des modèles AWX par service dans l'administration, détail des étapes de workflow dans la fiche demande et notifications de fin de job AWX dans la cloche
+- Phase 14 terminée : fusion AWX / Ascender (migration `008_ascender_connector.sql`). Un seul adaptateur et un seul connecteur « Ascender », géré par le serveur (variables `AWX_*`) : URL en lecture seule, test réel `/api/v2/ping/`, import du catalogue réel (job + workflow templates via le jeton SSO), jobs 24 h calculés depuis les demandes. Libellés visibles « AWX » → « Ascender » ; le code interne garde le préfixe `awx`. Correctif : `/api/v2/me/` lu comme liste paginée.
 
 ## 4. Data Model Design (implémenté dans `db/001_schema.sql`)
 projects, categories, form_schemas, services, tenants, users, requests, execution_details, approvals, approval_levels, audit_events, adapters, connectors (checks / tests / history / catalog), batch_tests + vues d'agrégation du dashboard.

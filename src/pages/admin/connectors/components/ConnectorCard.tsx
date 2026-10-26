@@ -100,26 +100,37 @@ export default function ConnectorCard({
           {t('admin_last_sync')} · {lastSync}
         </span>
         <div className="ml-auto flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={onDuplicate}
-            disabled={readOnly}
-            title={t('admin_duplicate_aria', { name: connector.name })}
-            aria-label={t('admin_duplicate_aria', { name: connector.name })}
-            className="w-8 h-8 flex items-center justify-center rounded-lg border border-background-300 text-foreground-600 whitespace-nowrap cursor-pointer hover:bg-background-100 hover:text-foreground-900"
-          >
-            <i className="ri-file-copy-line" />
-          </button>
-          <button
-            type="button"
-            onClick={onDelete}
-            disabled={testing || syncing || readOnly}
-            title={t('admin_delete_aria', { name: connector.name })}
-            aria-label={t('admin_delete_aria', { name: connector.name })}
-            className="w-8 h-8 flex items-center justify-center rounded-lg border border-background-300 text-foreground-600 whitespace-nowrap cursor-pointer hover:bg-accent-100 hover:text-accent-900 hover:border-accent-300 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <i className="ri-delete-bin-6-line" />
-          </button>
+          {connector.managed ? (
+            <span
+              title={t('admin_managed_hint')}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-background-200 font-label text-[10px] text-foreground-700 whitespace-nowrap"
+            >
+              <i className="ri-lock-line" />{t('admin_managed_badge')}
+            </span>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={onDuplicate}
+                disabled={readOnly}
+                title={t('admin_duplicate_aria', { name: connector.name })}
+                aria-label={t('admin_duplicate_aria', { name: connector.name })}
+                className="w-8 h-8 flex items-center justify-center rounded-lg border border-background-300 text-foreground-600 whitespace-nowrap cursor-pointer hover:bg-background-100 hover:text-foreground-900"
+              >
+                <i className="ri-file-copy-line" />
+              </button>
+              <button
+                type="button"
+                onClick={onDelete}
+                disabled={testing || syncing || readOnly}
+                title={t('admin_delete_aria', { name: connector.name })}
+                aria-label={t('admin_delete_aria', { name: connector.name })}
+                className="w-8 h-8 flex items-center justify-center rounded-lg border border-background-300 text-foreground-600 whitespace-nowrap cursor-pointer hover:bg-accent-100 hover:text-accent-900 hover:border-accent-300 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <i className="ri-delete-bin-6-line" />
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={onTest}

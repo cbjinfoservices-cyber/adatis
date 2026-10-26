@@ -1,6 +1,7 @@
 const express = require('express');
 const { q, withTransaction } = require('../db');
 const m = require('../mappers');
+const ascender = require('../ascenderConnector');
 
 const router = express.Router();
 
@@ -11,7 +12,7 @@ async function hydrate(rows) {
     q('SELECT * FROM connector_tests WHERE connector_id = ANY($1) ORDER BY at DESC', [ids]),
     q('SELECT * FROM connector_checks WHERE connector_id = ANY($1) ORDER BY sort_order', [ids]),
     q('SELECT * FROM connector_history WHERE connector_id = ANY($1) ORDER BY at DESC', [ids]),
-    q('SELECT cc.*, c.name_fr AS category_name_fr FROM connector_catalog cc WHERE cc.connector_id = ANY($1)', [ids]),
+    q('SELECT * FROM connector_catalog WHERE connector_id = ANY($1) ORDER BY name_fr', [ids]),
   ]);
 
   const group = (list) => {
@@ -28,7 +29,7 @@ async function hydrate(rows) {
   const historyBy = group(history.rows);
   const catalogBy = group(catalog.rows);
 
-  return rows.map((row) => m.connector(row, {
+  const connectors = rows.map((row) => m.connector(row, {
     tests: (testsBy.get(row.id) || []).slice(0, 10).map((t) => ({
       at: t.at instanceof Date ? t.at.toISOString() : t.at,
       ok: t.ok,
@@ -55,6 +56,9 @@ async function hydrate(rows) {
       lastSync: c.last_sync instanceof Date ? c.last_sync.toISOString() : c.last_sync,
     })),
   }));
+
+  // Connecteur Ascender : valeurs réelles à la place des champs stockés.
+  return ascender.overlayAll(rows, connectors);
 }
 
 router.get('/batch-tests', async (req, res, next) => {
@@ -69,8 +73,8 @@ router.post('/connectors/batch-test', async (_req, res, next) => {
   try {
     const started = Date.now();
     const targets = await q(
-      `SELECT id, name, configured, latency_ms, health FROM connectors
-       WHERE retest_required_at IS NOT NULL AND configured = true
+      `SELECT id, name, configured, managed, latency_ms, health FROM connectors
+       WHERE retest_required_at IS NOT NULL AND (configured = true OR managed = true)
        ORDER BY name`,
     );
 
@@ -80,13 +84,20 @@ router.post('/connectors/batch-test', async (_req, res, next) => {
 
     const results = [];
     for (const target of targets.rows) {
+      if (ascender.isManaged(target)) {
+        // Test réel, enregistré par runTest lui-même.
+        // eslint-disable-next-line no-await-in-loop
+        const real = await ascender.runTest(target.id);
+        results.push({ id: target.id, ok: real.ok, latency: real.latency, recorded: true });
+        continue;
+      }
       const latency = Math.round(60 + Math.random() * 320);
       const ok = target.health !== 'down';
       results.push({ id: target.id, ok, latency });
     }
 
     await withTransaction(async (client) => {
-      for (const result of results) {
+      for (const result of results.filter((r) => !r.recorded)) {
         await client.query(
           'INSERT INTO connector_tests (connector_id, at, ok, latency, error) VALUES ($1, now(), $2, $3, $4)',
           [result.id, result.ok, result.ok ? result.latency : 0, result.ok ? null : 'Test groupé : hôte injoignable'],
@@ -148,6 +159,13 @@ router.post('/connectors', async (req, res, next) => {
     const adapter = await q('SELECT * FROM adapters WHERE kind = $1', [kind]);
     if (!adapter.rows.length) return res.status(400).json({ error: 'unknown_adapter' });
 
+    // Un seul connecteur Ascender : celui configuré par les variables AWX_*.
+    const managed = kind === ascender.KIND;
+    if (managed) {
+      const exists = await q('SELECT 1 FROM connectors WHERE kind = $1', [kind]);
+      if (exists.rows.length) return res.status(409).json({ error: 'connector_exists' });
+    }
+
     const count = await q('SELECT count(*)::int AS n FROM connectors');
     const id = `cn-${kind.slice(0, 3)}-${String(count.rows[0].n + 1).padStart(2, '0')}-${Date.now().toString().slice(-4)}`;
     const cleanEndpoint = typeof endpoint === 'string' ? endpoint.trim() : '';
@@ -162,10 +180,10 @@ router.post('/connectors', async (req, res, next) => {
     const { rows } = await q(
       `INSERT INTO connectors (id, kind, name, endpoint, endpoint_default, auth_mode, version,
                                notes, configured, health, latency_ms, uptime, last_sync, jobs_24h,
-                               success_rate, scope, capabilities)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',0,0,NULL,0,0,$10,$11)
+                               success_rate, scope, capabilities, managed)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',0,0,NULL,0,0,$10,$11,$12)
        RETURNING *`,
-      [id, kind, name, cleanEndpoint || '—', defaultEndpoint, authMode, version, notes, isConfigured, scope, caps],
+      [id, kind, name, cleanEndpoint || '—', defaultEndpoint, authMode, version, notes, isConfigured, scope, caps, managed],
     );
 
     await q(
@@ -213,7 +231,9 @@ router.patch('/connectors/:id', async (req, res, next) => {
       changes.push(`name = $${params.length}`);
       history.push({ field: 'name', from: before.name, to: name.trim() });
     }
-    if (typeof endpoint === 'string' && endpoint.trim() && endpoint !== before.endpoint) {
+    // L'URL d'Ascender vient de AWX_BASE_URL : elle ne se modifie pas ici.
+    if (!ascender.isManaged(before)
+      && typeof endpoint === 'string' && endpoint.trim() && endpoint !== before.endpoint) {
       params.push(endpoint.trim());
       changes.push(`endpoint = $${params.length}`);
       history.push({ field: 'endpoint', from: before.endpoint, to: endpoint.trim() });
@@ -248,6 +268,9 @@ router.patch('/connectors/:id', async (req, res, next) => {
 
 router.delete('/connectors/:id', async (req, res, next) => {
   try {
+    const current = await q('SELECT managed FROM connectors WHERE id = $1', [req.params.id]);
+    if (ascender.isManaged(current.rows[0])) return res.status(409).json({ error: 'connector_managed' });
+
     const { rowCount } = await q('DELETE FROM connectors WHERE id = $1', [req.params.id]);
     if (!rowCount) return res.status(404).json({ error: 'connector_not_found' });
     return res.status(204).end();
@@ -259,6 +282,13 @@ router.post('/connectors/:id/test', async (req, res, next) => {
     const { ok = true, latency = 0, error = null } = req.body || {};
     const current = await q('SELECT * FROM connectors WHERE id = $1', [req.params.id]);
     if (!current.rows.length) return res.status(404).json({ error: 'connector_not_found' });
+
+    // Ascender : ping réel, le résultat envoyé par le navigateur est ignoré.
+    if (ascender.isManaged(current.rows[0])) {
+      await ascender.runTest(req.params.id);
+      const { rows } = await q('SELECT * FROM connectors WHERE id = $1', [req.params.id]);
+      return res.json((await hydrate(rows))[0]);
+    }
 
     await withTransaction(async (client) => {
       await client.query(
@@ -283,6 +313,20 @@ router.post('/connectors/:id/sync', async (req, res, next) => {
   try {
     const current = await q('SELECT * FROM connectors WHERE id = $1', [req.params.id]);
     if (!current.rows.length) return res.status(404).json({ error: 'connector_not_found' });
+
+    // Ascender : import des modèles visibles avec le jeton de l'utilisateur.
+    if (ascender.isManaged(current.rows[0])) {
+      if (!req.auth?.session) return res.status(409).json({ error: 'ascender_session_required' });
+      try {
+        await ascender.syncCatalog({ connectorId: req.params.id, session: req.auth.session });
+      } catch (err) {
+        if (err.code === 'ascender_session_required') return res.status(409).json({ error: err.code });
+        console.error('[ascender] import du catalogue impossible :', err.message);
+        return res.status(502).json({ error: 'ascender_unreachable', message: err.message });
+      }
+      const { rows } = await q('SELECT * FROM connectors WHERE id = $1', [req.params.id]);
+      return res.json((await hydrate(rows))[0]);
+    }
 
     await q(
       `UPDATE connectors SET last_sync = now(), health = CASE WHEN configured THEN 'healthy' ELSE health END

@@ -99,7 +99,7 @@ router.get('/callback', async (req, res) => {
   try {
     const tokens = await awx.exchangeCode({ code: String(code), redirectUri: callbackUrl(req) });
     const identity = await awx.fetchIdentity(tokens.access_token);
-    if (!identity.username) throw new Error('AWX n’a pas renvoyé d’identifiant utilisateur');
+    if (!identity.username) throw new Error('Ascender n’a pas renvoyé d’identifiant utilisateur');
 
     const mappings = await listMappings();
     const { role, reason } = resolveRole(identity, mappings);
