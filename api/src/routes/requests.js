@@ -7,6 +7,7 @@ const approvalFlow = require('../approvalFlow');
 const { scopeOf, scopeSql, canSee, canActOn } = require('../access');
 const awxRbac = require('../awxRbac');
 const { validatePayload, sanitizeFreePayload } = require('../formValidation');
+const { sealSecrets } = require('../secrets');
 const { authMode, ensureAccessToken } = require('../auth');
 
 const router = express.Router();
@@ -118,12 +119,14 @@ router.post('/requests', async (req, res, next) => {
     // Valeurs du formulaire validées côté serveur : ce sont elles qui partent
     // dans les extra_vars Ascender.
     let values;
+    let secretFields = [];
     if (Array.isArray(service.fields)) {
       const checked = validatePayload(service.fields, payload);
       if (checked.errors.length) {
         return res.status(422).json({ error: 'invalid_payload', fields: checked.errors });
       }
       values = checked.values;
+      secretFields = checked.secrets;
     } else {
       values = sanitizeFreePayload(payload);
     }
@@ -137,7 +140,9 @@ router.post('/requests', async (req, res, next) => {
                                approval, approval_state, business_type, payload)
          VALUES ($1,$2,$3,$4,$5,'queued',0,$6,$7,'custom',$8)`,
         [id, serviceId, userId, tenantId, environment, approval,
-          approval === 'none' ? 'not_required' : 'pending', JSON.stringify(values)],
+          approval === 'none' ? 'not_required' : 'pending',
+          // Champs « password » chiffrés en base, jamais stockés en clair.
+          JSON.stringify(sealSecrets(values, secretFields))],
       );
 
       // Service soumis à approbation : circuit créé, aucun lancement immédiat.

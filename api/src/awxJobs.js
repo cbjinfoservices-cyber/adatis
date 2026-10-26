@@ -1,6 +1,7 @@
 const { q } = require('./db');
 const awx = require('./awx');
 const awxRbac = require('./awxRbac');
+const { revealSecrets } = require('./secrets');
 const { authMode, ensureAccessToken } = require('./auth');
 
 /**
@@ -53,7 +54,8 @@ const buildExtraVars = ({
   portal_environment: environment || '',
   portal_user: user?.awxUsername || user?.name || '',
   portal_user_email: user?.email || '',
-  portal_request_payload: payload || {},
+  // Seul endroit où les champs secrets sont déchiffrés.
+  portal_request_payload: revealSecrets(payload),
 });
 
 const saveJob = async ({

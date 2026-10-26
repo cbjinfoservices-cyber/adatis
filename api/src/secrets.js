@@ -52,4 +52,35 @@ const decrypt = (stored) => {
   }
 };
 
-module.exports = { encrypt, decrypt };
+/* --- Champs secrets des formulaires (type « password ») ------------------ */
+
+const SECRET_MARK = '$secret';
+
+const isSealed = (value) => Boolean(value) && typeof value === 'object' && SECRET_MARK in value;
+
+/**
+ * Remplace les champs secrets par { $secret: <chiffré> } avant stockage.
+ * Sans clé de chiffrement, la valeur n'est pas conservée.
+ */
+const sealSecrets = (values, names) => {
+  const out = { ...values };
+  const key = currentKey();
+  (names || []).forEach((name) => {
+    if (out[name] === undefined || out[name] === null || out[name] === '') return;
+    if (key) out[name] = { [SECRET_MARK]: encrypt(out[name]) };
+    else delete out[name];
+  });
+  return out;
+};
+
+/** Valeurs en clair, uniquement pour construire les extra_vars Ascender. */
+const revealSecrets = (payload) => {
+  if (!payload || typeof payload !== 'object') return payload || {};
+  return Object.fromEntries(Object.entries(payload).map(([name, value]) => (
+    [name, isSealed(value) ? decrypt(value[SECRET_MARK]) : value]
+  )));
+};
+
+module.exports = {
+  encrypt, decrypt, sealSecrets, revealSecrets,
+};

@@ -120,7 +120,8 @@ const checkField = (field, raw) => {
 
 /**
  * Valide `payload` contre les champs du schéma.
- * Renvoie { values, errors } : values ne contient que les champs du schéma.
+ * Renvoie { values, errors, secrets } : values ne contient que les champs du
+ * schéma ; secrets liste les champs « password » (chiffrés avant stockage).
  */
 const validatePayload = (fields, payload) => {
   const input = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
@@ -132,7 +133,8 @@ const validatePayload = (fields, payload) => {
     if (result.error) errors.push({ field: field.name, ...result.error });
     else if (result.value !== null) values[field.name] = result.value;
   }
-  return { values, errors };
+  const secrets = (fields || []).filter((f) => f && f.type === 'password').map((f) => f.name);
+  return { values, errors, secrets };
 };
 
 /**
