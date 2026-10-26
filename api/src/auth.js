@@ -9,18 +9,25 @@ const awx = require('./awx');
  * En base, seule son empreinte SHA-256 est stockée, avec les jetons OAuth AWX
  * de l'utilisateur (utilisés plus tard pour lancer les jobs en son nom).
  *
- * AUTH_MODE=awx active le SSO. Le mode reste « désactivé » tant que la
- * configuration AWX est incomplète, pour ne jamais verrouiller le portail.
+ * AUTH_MODE=awx active le SSO. Si la configuration Ascender est incomplète,
+ * le mode passe à « misconfigured » : le portail reste fermé (503) plutôt que
+ * de s'ouvrir sans authentification.
  */
 
 const COOKIE_NAME = 'asp_session';
 const STATE_COOKIE = 'asp_oauth_state';
 
+/** 'awx' (SSO actif), 'disabled' (portail ouvert, dev) ou 'misconfigured' (fermé). */
 const authMode = () => {
   const requested = String(process.env.AUTH_MODE || 'disabled').trim().toLowerCase();
   if (requested !== 'awx') return 'disabled';
-  return awx.readConfig().configured ? 'awx' : 'disabled';
+  return awx.readConfig().configured ? 'awx' : 'misconfigured';
 };
+
+const misconfigured = (res) => res.status(503).json({
+  error: 'auth_misconfigured',
+  message: 'AUTH_MODE=awx mais AWX_BASE_URL, AWX_CLIENT_ID ou AWX_CLIENT_SECRET manque.',
+});
 
 const sessionTtlHours = () => {
   const parsed = Number(process.env.SESSION_TTL_HOURS);
@@ -274,7 +281,7 @@ const ensureAccessToken = async (sessionRow) => {
 const attachSession = async (req, res, next) => {
   const mode = authMode();
   req.auth = { mode, session: null, user: null, token: '' };
-  if (mode === 'disabled') return next();
+  if (mode !== 'awx') return next();
 
   const cookies = parseCookies(req.headers.cookie);
   const token = cookies[COOKIE_NAME];
@@ -295,13 +302,17 @@ const attachSession = async (req, res, next) => {
 };
 
 const requireAuth = (req, res, next) => {
-  if (authMode() === 'disabled') return next();
+  const mode = authMode();
+  if (mode === 'disabled') return next();
+  if (mode === 'misconfigured') return misconfigured(res);
   if (!req.auth?.user) return res.status(401).json({ error: 'auth_required' });
   return next();
 };
 
 const requireRole = (...roles) => (req, res, next) => {
-  if (authMode() === 'disabled') return next();
+  const mode = authMode();
+  if (mode === 'disabled') return next();
+  if (mode === 'misconfigured') return misconfigured(res);
   const role = req.auth?.user?.role;
   if (!role) return res.status(401).json({ error: 'auth_required' });
   const allowed = roles.length === 0 ? ['admin'] : roles.flat();

@@ -47,8 +47,8 @@ app.get('/health', async (_req, res) => {
 });
 
 // --- Authentification -------------------------------------------------------
-// AUTH_MODE=awx : SSO AWX obligatoire. Tant que la configuration AWX est
-// incomplète, authMode() reste « disabled » pour ne jamais verrouiller le portail.
+// AUTH_MODE=awx : SSO Ascender obligatoire. Si la configuration est incomplète,
+// authMode() vaut « misconfigured » et toute route protégée répond 503.
 app.use('/api', attachSession);
 app.use('/api/auth', authRoutes);
 app.use('/api', (req, res, next) => {
@@ -91,26 +91,39 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'internal_error', message: err.message });
 });
 
-let stopProbing = () => {};
+/** Démarre le serveur et les tâches de fond (sondes, purge des sessions). */
+function start() {
+  let stopProbing = () => {};
 
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[api] ASP portal API à l'écoute sur :${PORT}`);
-  // Sonde interne toutes les 60 s : alimente l'historique 24 h même sans visiteur.
-  stopProbing = startProbing();
-  // Purge des sessions expirées (toutes les heures, sans bloquer l'arrêt).
-  setInterval(() => {
-    q('DELETE FROM auth_sessions WHERE expires_at < now()').catch(() => {});
-  }, 3600 * 1000).unref();
-});
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[api] ASP portal API à l'écoute sur :${PORT}`);
+    const mode = authMode();
+    if (mode === 'misconfigured') {
+      console.error('[api] AUTH_MODE=awx mais la configuration Ascender est incomplète (AWX_BASE_URL, AWX_CLIENT_ID, AWX_CLIENT_SECRET) : portail fermé.');
+    } else if (mode === 'disabled' && process.env.NODE_ENV === 'production') {
+      console.warn('[api] AUTH_MODE=disabled en production : le portail est ouvert sans authentification.');
+    }
+    // Sonde interne toutes les 60 s : alimente l'historique 24 h même sans visiteur.
+    stopProbing = startProbing();
+    // Purge des sessions expirées (toutes les heures, sans bloquer l'arrêt).
+    setInterval(() => {
+      q('DELETE FROM auth_sessions WHERE expires_at < now()').catch(() => {});
+    }, 3600 * 1000).unref();
+  });
 
-function shutdown(signal) {
-  console.log(`[api] arrêt demandé (${signal})`);
-  stopProbing();
-  server.close(() => process.exit(0));
-  setTimeout(() => process.exit(1), 10000);
+  const shutdown = (signal) => {
+    console.log(`[api] arrêt demandé (${signal})`);
+    stopProbing();
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(1), 10000);
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  return server;
 }
 
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+// Importé par les tests : l'application est exportée sans écouter de port.
+if (require.main === module) start();
 
 module.exports = app;

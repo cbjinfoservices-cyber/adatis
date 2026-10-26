@@ -1044,6 +1044,8 @@ const en = {
   notif_awx_success_title: 'Ascender job completed',
   notif_awx_failed_title: 'Ascender job failed',
   notif_awx_canceled_title: 'Ascender job canceled',
+  auth_login_misconfigured_title: "Sign-in unavailable: incomplete configuration",
+  auth_login_misconfigured_body: "Ascender SSO is required (AUTH_MODE=awx) but its configuration is incomplete. The portal stays closed until the missing server variables are set.",
 };
 
 export default en;

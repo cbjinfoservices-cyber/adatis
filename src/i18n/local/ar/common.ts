@@ -785,6 +785,8 @@ const ar = {
   notif_awx_success_title: 'اكتملت مهمة Ascender',
   notif_awx_failed_title: 'فشلت مهمة Ascender',
   notif_awx_canceled_title: 'أُلغيت مهمة Ascender',
+  auth_login_misconfigured_title: "تسجيل الدخول غير متاح: إعدادات ناقصة",
+  auth_login_misconfigured_body: "الدخول الموحد عبر Ascender مطلوب (AUTH_MODE=awx) لكن إعداداته ناقصة. تبقى البوابة مغلقة حتى يتم ضبط المتغيرات الناقصة على الخادم.",
 };
 
 export default ar;

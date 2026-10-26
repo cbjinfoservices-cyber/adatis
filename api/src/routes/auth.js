@@ -65,7 +65,8 @@ router.get('/config', (req, res) => {
 
 /** Étape 1 : redirection vers l'écran de connexion AWX. */
 router.get('/login', (req, res) => {
-  if (authMode() === 'disabled') return res.redirect(302, `${frontendOrigin(req)}/login?auth_error=disabled`);
+  const mode = authMode();
+  if (mode !== 'awx') return res.redirect(302, `${frontendOrigin(req)}/login?auth_error=${mode}`);
   const next = safeNext(req.query.next);
   const state = `${crypto.randomBytes(16).toString('hex')}|${next}`;
   setStateCookie(res, req, state);

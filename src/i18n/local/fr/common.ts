@@ -1044,6 +1044,8 @@ const fr = {
   notif_awx_success_title: 'Job Ascender terminé',
   notif_awx_failed_title: 'Job Ascender en échec',
   notif_awx_canceled_title: 'Job Ascender annulé',
+  auth_login_misconfigured_title: "Connexion indisponible : configuration incomplète",
+  auth_login_misconfigured_body: "Le SSO Ascender est exigé (AUTH_MODE=awx) mais sa configuration est incomplète. Le portail reste fermé tant que les variables manquantes ne sont pas renseignées côté serveur.",
 };
 
 export default fr;

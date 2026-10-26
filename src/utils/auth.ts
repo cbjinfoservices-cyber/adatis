@@ -2,7 +2,8 @@ import { API_BASE, api } from '@/utils/api';
 
 export type PortalRole = 'admin' | 'approver' | 'requester';
 
-export type AuthMode = 'awx' | 'disabled';
+/** misconfigured : AUTH_MODE=awx mais configuration incomplète, portail fermé. */
+export type AuthMode = 'awx' | 'disabled' | 'misconfigured';
 
 export type AuthUser = {
   id: string;

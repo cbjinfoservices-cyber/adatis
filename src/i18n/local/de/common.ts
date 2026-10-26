@@ -785,6 +785,8 @@ const de = {
   notif_awx_success_title: 'Ascender-Job abgeschlossen',
   notif_awx_failed_title: 'Ascender-Job fehlgeschlagen',
   notif_awx_canceled_title: 'Ascender-Job abgebrochen',
+  auth_login_misconfigured_title: "Anmeldung nicht verfügbar: unvollständige Konfiguration",
+  auth_login_misconfigured_body: "Ascender-SSO ist erforderlich (AUTH_MODE=awx), aber die Konfiguration ist unvollständig. Das Portal bleibt gesperrt, bis die fehlenden Servervariablen gesetzt sind.",
 };
 
 export default de;

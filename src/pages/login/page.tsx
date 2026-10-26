@@ -9,6 +9,7 @@ import LanguageMenu from '@/components/feature/LanguageMenu';
 
 const ERROR_KEYS: Record<string, string> = {
   disabled: 'auth_login_error_disabled',
+  misconfigured: 'auth_login_misconfigured_body',
   invalid_state: 'auth_login_error_state',
   exchange_failed: 'auth_login_error_exchange',
   awx_unreachable: 'auth_login_error_unreachable',
@@ -184,6 +185,30 @@ export default function LoginPage() {
                     {copied && <p className="mt-1 text-[11px] text-primary-700">{t('auth_copied')}</p>}
                   </div>
                 )}
+              </div>
+            ) : config?.mode === 'misconfigured' ? (
+              <div className="mt-7 rounded-xl border border-accent-300 bg-accent-50 p-4">
+                <div className="flex items-start gap-2.5">
+                  <span className="w-5 h-5 flex items-center justify-center shrink-0 text-accent-700">
+                    <i className="ri-lock-2-line" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-accent-900">{t('auth_login_misconfigured_title')}</p>
+                    <p className="mt-1 text-xs text-accent-900/80 leading-relaxed">{t('auth_login_misconfigured_body')}</p>
+                    <ul className="mt-2 space-y-1">
+                      {([
+                        ['AWX_BASE_URL', config.checks.baseUrl],
+                        ['AWX_CLIENT_ID', config.checks.clientId],
+                        ['AWX_CLIENT_SECRET', config.checks.clientSecret],
+                      ] as const).map(([name, ok]) => (
+                        <li key={name} className="flex items-center gap-1.5 font-label text-[11px] text-foreground-800" dir="ltr">
+                          <i className={ok ? 'ri-checkbox-circle-line text-primary-700' : 'ri-close-circle-line text-accent-700'} />
+                          {name}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="mt-7 rounded-xl border border-background-200 bg-background-100 p-4">

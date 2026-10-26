@@ -6,7 +6,8 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "test": "node --test --test-concurrency=1"
   },
   "engines": {
     "node": ">=20"
@@ -16,5 +17,9 @@
     "cors": "2.8.5",
     "express": "4.21.2",
     "pg": "8.13.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.11",
+    "@electric-sql/pglite-socket": "^0.2.14"
   }
 }

@@ -69,7 +69,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     document.documentElement.dir = base === 'ar' ? 'rtl' : 'ltr';
   }, [i18n.language]);
 
-  if (authMode === 'awx' && !authLoading && !me?.authenticated) {
+  if (authMode !== 'disabled' && !authLoading && !me?.authenticated) {
     return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}` }} />;
   }
 
