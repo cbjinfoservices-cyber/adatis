@@ -6,7 +6,7 @@ import DynamicForm from '@/components/feature/form-engine/DynamicForm';
 import SimulatedEmail from '@/components/feature/SimulatedEmail';
 import RequestSummary from '@/pages/service/components/RequestSummary';
 import { ErrorBlock, LoadingBlock } from '@/components/base/DataState';
-import { api } from '@/utils/api';
+import { api, ApiError } from '@/utils/api';
 import { tx } from '@/utils/catalog';
 import { loadStore, projectIconOf, useStore } from '@/utils/store';
 import type { FieldValue, ServiceItem, UniversalFormSchema } from '@/types/catalog';
@@ -59,8 +59,17 @@ export default function ServicePage() {
       setLaunch(created.awxLaunch ?? null);
       setReference(created.id);
       window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch {
-      setSubmitError(t('request_submit_error'));
+    } catch (err) {
+      const detail = err instanceof ApiError
+        ? (err.detail as { error?: string; fields?: { field: string }[] } | null)
+        : null;
+      if (detail?.error === 'invalid_payload') {
+        setSubmitError(t('request_invalid_payload', { fields: (detail.fields || []).map((f) => f.field).join(', ') }));
+      } else if (detail?.error === 'service_forbidden') {
+        setSubmitError(t('request_service_forbidden'));
+      } else {
+        setSubmitError(t('request_submit_error'));
+      }
     } finally {
       setSubmitting(false);
     }

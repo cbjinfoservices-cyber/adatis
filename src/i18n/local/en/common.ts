@@ -1050,6 +1050,11 @@ const en = {
   awx_job_approval_rejected: "Request rejected: no Ascender job will be launched.",
   appr_self_forbidden: "You cannot approve your own request.",
   appr_already_decided: "This request has already been decided.",
+  request_invalid_payload: "Request rejected by the server: invalid fields ({{fields}}).",
+  request_service_forbidden: "Your Ascender permissions do not allow ordering this service.",
+  err_option: "Value not offered",
+  err_type: "Invalid value type",
+  err_date: "Invalid date",
 };
 
 export default en;

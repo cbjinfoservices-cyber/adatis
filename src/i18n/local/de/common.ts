@@ -791,6 +791,11 @@ const de = {
   awx_job_approval_rejected: "Anfrage abgelehnt: Es wird kein Ascender-Job gestartet.",
   appr_self_forbidden: "Du kannst deine eigene Anfrage nicht genehmigen.",
   appr_already_decided: "Über diese Anfrage wurde bereits entschieden.",
+  request_invalid_payload: "Anfrage vom Server abgelehnt: ungültige Felder ({{fields}}).",
+  request_service_forbidden: "Deine Ascender-Berechtigungen erlauben es nicht, diesen Service zu bestellen.",
+  err_option: "Wert nicht angeboten",
+  err_type: "Ungültiger Werttyp",
+  err_date: "Ungültiges Datum",
 };
 
 export default de;

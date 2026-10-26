@@ -5,6 +5,8 @@ const awx = require('../awx');
 const awxJobs = require('../awxJobs');
 const approvalFlow = require('../approvalFlow');
 const { scopeOf, scopeSql, canSee, canActOn } = require('../access');
+const awxRbac = require('../awxRbac');
+const { validatePayload, sanitizeFreePayload } = require('../formValidation');
 const { authMode, ensureAccessToken } = require('../auth');
 
 const router = express.Router();
@@ -94,11 +96,39 @@ router.post('/requests', async (req, res, next) => {
     const userId = sessionUser ? sessionUser.id : req.body?.userId || null;
     const tenantId = sessionUser ? sessionUser.tenantId || null : req.body?.tenantId || null;
 
-    const created = await withTransaction(async (client) => {
-      const svc = await client.query('SELECT id, approval FROM services WHERE id = $1', [serviceId]);
-      if (!svc.rows.length) return null;
-      const { approval } = svc.rows[0];
+    const svc = await q(
+      `SELECT s.id, s.approval, s.awx_job_template_id, s.awx_workflow_job_template_id, f.fields
+         FROM services s LEFT JOIN form_schemas f ON f.id = s.form_id
+        WHERE s.id = $1`,
+      [serviceId],
+    );
+    if (!svc.rows.length) return res.status(404).json({ error: 'service_not_found' });
+    const service = svc.rows[0];
+    const { approval } = service;
 
+    // RBAC Ascender vérifié dès la commande, pas seulement au lancement.
+    if (req.auth?.session) {
+      const template = awxJobs.templateForService(service);
+      const access = template ? await awxRbac.accessForSession(req.auth.session) : null;
+      if (template && !awxRbac.allowed(access, template.kind, template.id)) {
+        return res.status(403).json({ error: 'service_forbidden' });
+      }
+    }
+
+    // Valeurs du formulaire validées côté serveur : ce sont elles qui partent
+    // dans les extra_vars Ascender.
+    let values;
+    if (Array.isArray(service.fields)) {
+      const checked = validatePayload(service.fields, payload);
+      if (checked.errors.length) {
+        return res.status(422).json({ error: 'invalid_payload', fields: checked.errors });
+      }
+      values = checked.values;
+    } else {
+      values = sanitizeFreePayload(payload);
+    }
+
+    const created = await withTransaction(async (client) => {
       const seq = await client.query('SELECT nextval(\'request_ref_seq\') AS n');
       const id = `REQ-${new Date().getFullYear()}-${seq.rows[0].n}`;
 
@@ -107,7 +137,7 @@ router.post('/requests', async (req, res, next) => {
                                approval, approval_state, business_type, payload)
          VALUES ($1,$2,$3,$4,$5,'queued',0,$6,$7,'custom',$8)`,
         [id, serviceId, userId, tenantId, environment, approval,
-          approval === 'none' ? 'not_required' : 'pending', JSON.stringify(payload)],
+          approval === 'none' ? 'not_required' : 'pending', JSON.stringify(values)],
       );
 
       // Service soumis à approbation : circuit créé, aucun lancement immédiat.
@@ -119,18 +149,16 @@ router.post('/requests', async (req, res, next) => {
       return { id, approvalId };
     });
 
-    if (!created) return res.status(404).json({ error: 'service_not_found' });
-
     // Lancement du job Ascender avec le jeton de l'utilisateur connecté.
     let launch = null;
     if (!created.approvalId && authMode() === 'awx' && req.auth?.session) {
-      const svc = await q(LAUNCH_SELECT, [serviceId]);
-      if (svc.rows.length) {
+      const launchService = await q(LAUNCH_SELECT, [serviceId]);
+      if (launchService.rows.length) {
         launch = await awxJobs.launchForRequest({
           request: {
-            id: created.id, serviceId, environment, payload,
+            id: created.id, serviceId, environment, payload: values,
           },
-          service: svc.rows[0],
+          service: launchService.rows[0],
           session: req.auth.session,
           user: req.auth.user,
         });

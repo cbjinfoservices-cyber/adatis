@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { startStack } = require('../testing/helpers');
+const { PAYLOADS } = require('../testing/payloads');
 
 let stack;
 let admin;
@@ -30,7 +31,7 @@ test.after(async () => {
 });
 
 const order = (cookie, serviceId, environment = 'dev') => stack.call('POST', '/api/requests', {
-  cookie, body: { serviceId, environment, payload: { justification: 'test' } },
+  cookie, body: { serviceId, environment, payload: { ...PAYLOADS[serviceId], justification: 'test' } },
 });
 
 test('service sans approbation : job lancé immédiatement avec le jeton du demandeur', async () => {

@@ -791,6 +791,11 @@ const es = {
   awx_job_approval_rejected: "Solicitud rechazada: no se lanzará ningún job de Ascender.",
   appr_self_forbidden: "No puedes aprobar tu propia solicitud.",
   appr_already_decided: "Esta solicitud ya ha sido decidida.",
+  request_invalid_payload: "Solicitud rechazada por el servidor: campos no válidos ({{fields}}).",
+  request_service_forbidden: "Tus permisos de Ascender no permiten solicitar este servicio.",
+  err_option: "Valor no ofrecido",
+  err_type: "Tipo de valor no válido",
+  err_date: "Fecha no válida",
 };
 
 export default es;

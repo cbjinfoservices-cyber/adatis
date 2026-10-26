@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { startStack } = require('../testing/helpers');
+const { PAYLOADS } = require('../testing/payloads');
 
 let stack;
 let admin;
@@ -22,7 +23,7 @@ test.before(async () => {
   await stack.call('PATCH', '/api/admin/services/create-dns-record', { cookie: admin, body: { kind: 'job', templateId: 9 } });
   await stack.call('PATCH', '/api/admin/services/create-linux-server', { cookie: admin, body: { kind: 'job', templateId: 9 } });
 
-  const order = (cookie, serviceId) => stack.call('POST', '/api/requests', { cookie, body: { serviceId, payload: {} } });
+  const order = (cookie, serviceId) => stack.call('POST', '/api/requests', { cookie, body: { serviceId, payload: PAYLOADS[serviceId] } });
   aliceReq = (await order(alice, 'create-dns-record')).body.id;
   carolReq = (await order(carol, 'create-dns-record')).body.id;
   // Une approbation décidée par bob sur la demande de carol (pour l'audit).

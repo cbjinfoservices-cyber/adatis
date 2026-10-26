@@ -1050,6 +1050,11 @@ const fr = {
   awx_job_approval_rejected: "Demande refusée : aucun job Ascender ne sera lancé.",
   appr_self_forbidden: "Vous ne pouvez pas approuver votre propre demande.",
   appr_already_decided: "Cette demande a déjà été décidée.",
+  request_invalid_payload: "Demande refusée par le serveur : champs invalides ({{fields}}).",
+  request_service_forbidden: "Vos droits Ascender ne permettent pas de commander ce service.",
+  err_option: "Valeur non proposée",
+  err_type: "Type de valeur invalide",
+  err_date: "Date invalide",
 };
 
 export default fr;

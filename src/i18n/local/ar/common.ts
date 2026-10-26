@@ -791,6 +791,11 @@ const ar = {
   awx_job_approval_rejected: "تم رفض الطلب: لن تُشغَّل أي مهمة Ascender.",
   appr_self_forbidden: "لا يمكنك الموافقة على طلبك الخاص.",
   appr_already_decided: "تم البت في هذا الطلب مسبقاً.",
+  request_invalid_payload: "رفض الخادم الطلب: حقول غير صالحة ({{fields}}).",
+  request_service_forbidden: "صلاحياتك في Ascender لا تسمح بطلب هذه الخدمة.",
+  err_option: "قيمة غير مقترحة",
+  err_type: "نوع قيمة غير صالح",
+  err_date: "تاريخ غير صالح",
 };
 
 export default ar;
