@@ -3,6 +3,7 @@ const { q, withTransaction } = require('../db');
 const m = require('../mappers');
 const approvalFlow = require('../approvalFlow');
 const { authMode } = require('../auth');
+const { scopeOf, scopeSql, canSee } = require('../access');
 
 const router = express.Router();
 
@@ -58,6 +59,8 @@ router.get('/approvals', async (req, res, next) => {
 
     if (decision) { params.push(decision); where.push(`a.decision = $${params.length}`); }
     if (mine === 'true') where.push('a.my_turn = true');
+    const scoped = scopeSql(scopeOf(req), 'a', params);
+    if (scoped) where.push(scoped);
 
     params.push(Math.min(Number(limit) || 50, 200));
     const { rows } = await q(
@@ -76,7 +79,7 @@ router.get('/approvals', async (req, res, next) => {
 router.get('/approvals/:id', async (req, res, next) => {
   try {
     const { rows } = await q(`${APPROVAL_SELECT} WHERE a.id = $1`, [req.params.id]);
-    if (!rows.length) return res.status(404).json({ error: 'approval_not_found' });
+    if (!rows.length || !canSee(scopeOf(req), rows[0])) return res.status(404).json({ error: 'approval_not_found' });
     const levels = await levelsFor([rows[0].id]);
     return res.json(m.approval(rows[0], levels.get(rows[0].id) || []));
   } catch (err) { return next(err); }
@@ -127,6 +130,10 @@ router.get('/audit', async (req, res, next) => {
       where.push(`(e.ref ILIKE $${i} OR u.name ILIKE $${i} OR s.name_fr ILIKE $${i}
                    OR s.name_en ILIKE $${i} OR e.comment_fr ILIKE $${i})`);
     }
+
+    // L'audit suit le périmètre des demandes qu'il référence.
+    const scoped = scopeSql(scopeOf(req), 'rq', params);
+    if (scoped) where.push(`e.ref IN (SELECT rq.id FROM requests rq WHERE ${scoped})`);
 
     params.push(Math.min(Number(limit) || 100, 300));
     const { rows } = await q(

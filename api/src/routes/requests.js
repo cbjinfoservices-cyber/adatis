@@ -4,6 +4,7 @@ const m = require('../mappers');
 const awx = require('../awx');
 const awxJobs = require('../awxJobs');
 const approvalFlow = require('../approvalFlow');
+const { scopeOf, scopeSql, canSee, canActOn } = require('../access');
 const { authMode, ensureAccessToken } = require('../auth');
 
 const router = express.Router();
@@ -42,6 +43,8 @@ router.get('/requests', async (req, res, next) => {
       where.push(`(r.id ILIKE $${i} OR s.name_fr ILIKE $${i} OR s.name_en ILIKE $${i}
                    OR u.name ILIKE $${i} OR t.name ILIKE $${i})`);
     }
+    const scoped = scopeSql(scopeOf(req), 'r', params);
+    if (scoped) where.push(scoped);
 
     params.push(Math.min(Number(limit) || 50, 200));
     const { rows } = await q(
@@ -58,7 +61,7 @@ router.get('/requests', async (req, res, next) => {
 router.get('/requests/:id', async (req, res, next) => {
   try {
     let { rows } = await q(`${REQUEST_SELECT} WHERE r.id = $1`, [req.params.id]);
-    if (!rows.length) return res.status(404).json({ error: 'request_not_found' });
+    if (!rows.length || !canSee(scopeOf(req), rows[0])) return res.status(404).json({ error: 'request_not_found' });
 
     // Job AWX encore actif : on rafraîchit son état avant de répondre.
     if (rows[0].awx_job_id
@@ -146,7 +149,8 @@ router.post('/requests/:id/awx/launch', async (req, res, next) => {
       return res.status(409).json({ error: 'awx_disabled' });
     }
     const { rows } = await q(`${REQUEST_SELECT} WHERE r.id = $1`, [req.params.id]);
-    if (!rows.length) return res.status(404).json({ error: 'request_not_found' });
+    if (!rows.length || !canSee(scopeOf(req), rows[0])) return res.status(404).json({ error: 'request_not_found' });
+    if (!canActOn(scopeOf(req), rows[0])) return res.status(403).json({ error: 'forbidden' });
     if (rows[0].awx_job_id) return res.status(409).json({ error: 'awx_job_exists' });
     if (!approvalFlow.LAUNCHABLE.includes(rows[0].approval_state)) {
       return res.status(409).json({ error: `approval_${rows[0].approval_state}` });
@@ -174,7 +178,7 @@ router.post('/requests/:id/awx/launch', async (req, res, next) => {
 router.post('/requests/:id/awx/sync', async (req, res, next) => {
   try {
     const { rows } = await q(`${REQUEST_SELECT} WHERE r.id = $1`, [req.params.id]);
-    if (!rows.length) return res.status(404).json({ error: 'request_not_found' });
+    if (!rows.length || !canSee(scopeOf(req), rows[0])) return res.status(404).json({ error: 'request_not_found' });
     if (!rows[0].awx_job_id) return res.status(409).json({ error: 'awx_job_missing' });
     if (!req.auth?.session) return res.status(401).json({ error: 'awx_session_missing' });
 
@@ -192,7 +196,7 @@ router.post('/requests/:id/awx/sync', async (req, res, next) => {
 router.get('/requests/:id/awx/workflow', async (req, res, next) => {
   try {
     const { rows } = await q(`${REQUEST_SELECT} WHERE r.id = $1`, [req.params.id]);
-    if (!rows.length) return res.status(404).json({ error: 'request_not_found' });
+    if (!rows.length || !canSee(scopeOf(req), rows[0])) return res.status(404).json({ error: 'request_not_found' });
     const row = rows[0];
     if (!row.awx_job_id) return res.status(409).json({ error: 'awx_job_missing' });
     if (row.awx_job_kind !== 'workflow') return res.status(409).json({ error: 'not_a_workflow' });
@@ -219,13 +223,14 @@ router.get('/awx/jobs', async (req, res, next) => {
     const { refresh, status, user, search, limit = 200 } = req.query;
     const max = Math.min(Number(limit) || 200, 500);
 
-    let { rows } = await q(
-      `${REQUEST_SELECT}
-       WHERE r.awx_job_id IS NOT NULL
+    const params = [];
+    const scoped = scopeSql(scopeOf(req), 'r', params);
+    params.push(max);
+    const jobsSql = `${REQUEST_SELECT}
+       WHERE r.awx_job_id IS NOT NULL${scoped ? ` AND ${scoped}` : ''}
        ORDER BY COALESCE(r.awx_started_at, r.created_at) DESC
-       LIMIT $1`,
-      [max],
-    );
+       LIMIT $${params.length}`;
+    let { rows } = await q(jobsSql, params);
 
     const wantsRefresh = ['1', 'true', 'yes'].includes(String(refresh || '').toLowerCase());
     if (wantsRefresh && req.auth?.session) {
@@ -236,13 +241,7 @@ router.get('/awx/jobs', async (req, res, next) => {
         await Promise.all(active.map((row) => awxJobs
           .syncRequest({ request: row, session: req.auth.session })
           .catch(() => null)));
-        ({ rows } = await q(
-          `${REQUEST_SELECT}
-           WHERE r.awx_job_id IS NOT NULL
-           ORDER BY COALESCE(r.awx_started_at, r.created_at) DESC
-           LIMIT $1`,
-          [max],
-        ));
+        ({ rows } = await q(jobsSql, params));
       }
     }
 

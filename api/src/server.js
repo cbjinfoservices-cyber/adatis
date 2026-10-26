@@ -69,6 +69,10 @@ app.use('/api', (req, res, next) => {
   if (/^\/approvals\/[^/]+\/decision$/.test(path)) {
     return requireRole('admin', 'approver')(req, res, next);
   }
+  // Statut d'une demande forcé à la main : réservé aux administrateurs.
+  if (req.method === 'PATCH' && /^\/requests\/[^/]+$/.test(path)) {
+    return requireRole('admin')(req, res, next);
+  }
   return next();
 });
 
