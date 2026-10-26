@@ -14,7 +14,7 @@
 #   DOMAIN              hôte public (ex. portal.acme.fr) — active l'Ingress
 #   BASE_PATH           chemin de base du SPA (défaut : /)
 #   API_URL             URL de l'API vue par le navigateur (défaut : /api)
-#   ALLOWED_ORIGINS     origines CORS autorisées (défaut : *)
+#   ALLOWED_ORIGINS     origines tierces autorisées (défaut : vide = même origine via l'Ingress)
 #   DB_NAME / DB_USER   identifiants de la base (défaut : asp_portal / asp)
 #   CERT_MANAGER_ISSUER nom d'un ClusterIssuer cert-manager (optionnel)
 #   FORCE_DB_PASSWORD   impose un mot de passe (sinon réutilisé/créé automatiquement)
@@ -26,6 +26,7 @@
 #   AWX_BASE_URL        URL de base de l'AWX (ex. https://awx.acme.fr)
 #   AWX_CLIENT_ID       application OAuth2 créée dans AWX
 #   AWX_CLIENT_SECRET   secret de l'application (secret Kubernetes asp-auth)
+#   TOKEN_ENCRYPTION_KEY clé AES-256 des jetons en base (32 octets base64 ; sinon conservée ou générée)
 #   AWX_SCOPES          scopes demandés (défaut : read write)
 #   AWX_ADMIN_USERS     identifiants AWX promus admin (séparés par des virgules)
 #   AWX_REDIRECT_URI    défaut : ${PORTAL_URL}/api/auth/callback
@@ -39,7 +40,7 @@ TAG="${TAG:-$(date +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD 2>/dev/null || e
 DOMAIN="${DOMAIN:-}"
 BASE_PATH="${BASE_PATH:-/}"
 API_URL="${API_URL:-/api}"
-ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-*}"
+ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-}"
 DB_NAME="${DB_NAME:-asp_portal}"
 DB_USER="${DB_USER:-asp}"
 CERT_MANAGER_ISSUER="${CERT_MANAGER_ISSUER:-}"
@@ -194,13 +195,23 @@ else
   warn "RESEND_API_KEY absent : les alertes seront enregistrées mais aucun email ne sera envoyé"
 fi
 
-# SSO AWX : secret créé uniquement si le client secret est fourni.
-# Sans lui, AUTH_MODE=awx reste sans effet (le portail n'est jamais verrouillé).
+# SSO Ascender : secret créé uniquement si le client secret est fourni.
+# Sans lui, AUTH_MODE=awx ferme le portail (503) jusqu'à configuration complète.
 if [ -n "${AWX_CLIENT_SECRET}" ]; then
-  log "Mise à jour du secret asp-auth (SSO AWX)"
+  log "Mise à jour du secret asp-auth (SSO Ascender)"
+  # Clé de chiffrement des jetons : fournie, sinon reprise du secret existant,
+  # sinon générée (la changer déconnecte simplement les utilisateurs).
+  if [ -z "${TOKEN_ENCRYPTION_KEY:-}" ]; then
+    TOKEN_ENCRYPTION_KEY="$(kubectl -n "${NAMESPACE}" get secret asp-auth \
+      -o jsonpath='{.data.TOKEN_ENCRYPTION_KEY}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  fi
+  if [ -z "${TOKEN_ENCRYPTION_KEY}" ]; then
+    TOKEN_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+  fi
   kubectl -n "${NAMESPACE}" create secret generic asp-auth \
     --from-literal=AWX_CLIENT_SECRET="${AWX_CLIENT_SECRET}" \
     --from-literal=AWX_REDIRECT_URI="${AWX_REDIRECT_URI}" \
+    --from-literal=TOKEN_ENCRYPTION_KEY="${TOKEN_ENCRYPTION_KEY}" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   ok "SSO AWX configuré"
   if [ -n "${AWX_REDIRECT_URI}" ]; then
@@ -211,7 +222,7 @@ else
 fi
 
 if [ "${AUTH_MODE}" = "awx" ] && { [ -z "${AWX_BASE_URL}" ] || [ -z "${AWX_CLIENT_ID}" ] || [ -z "${AWX_CLIENT_SECRET}" ]; }; then
-  warn "AUTH_MODE=awx mais la configuration AWX est incomplète : le portail restera ouvert (non verrouillé)"
+  warn "AUTH_MODE=awx mais la configuration Ascender est incomplète : le portail restera fermé (503)"
 fi
 
 log "Injection du schéma, du jeu de données et du script de migration dans la ConfigMap asp-db-init"

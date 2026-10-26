@@ -6,9 +6,9 @@ metadata:
   labels:
     app.kubernetes.io/part-of: asp-portal
 data:
-  # Origines autorisées à appeler l'API (séparées par des virgules).
-  # Remplacé automatiquement par deploy.sh si ALLOWED_ORIGINS est défini.
-  ALLOWED_ORIGINS: "*"
+  # Origines tierces autorisées à appeler l'API (séparées par des virgules).
+  # Vide : le portail et l'API partagent la même origine via l'Ingress.
+  ALLOWED_ORIGINS: ""
   # URL de l'API consommée par le SPA (injectée au build, cf. deploy.sh).
   API_URL: "/api"
   # Destinataire des alertes de disponibilité (valeur par défaut, modifiable
@@ -17,9 +17,9 @@ data:
   # URL publique du portail, reprise dans le corps des emails d'alerte.
   PORTAL_URL: ""
   # --- Authentification SSO AWX ---------------------------------------------
-  # disabled = portail ouvert (comportement historique).
-  # awx = connexion OAuth2 obligatoire ; reste « disabled » tant que l'URL,
-  # le client id et le client secret ne sont pas tous fournis.
+  # disabled = portail ouvert, sans authentification (développement).
+  # awx = connexion OAuth2 Ascender obligatoire ; portail fermé (503) tant que
+  # l'URL, le client id et le client secret ne sont pas tous fournis.
   AUTH_MODE: "disabled"
   AWX_BASE_URL: ""
   AWX_CLIENT_ID: ""

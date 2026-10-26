@@ -5,7 +5,10 @@ const pool = new Pool({
   max: Number(process.env.PG_POOL_MAX || 10),
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
-  ssl: process.env.PG_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  // PG_SSL=true : certificat vérifié, sauf PG_SSL_REJECT_UNAUTHORIZED=false (certificat auto-signé).
+  ssl: process.env.PG_SSL === 'true'
+    ? { rejectUnauthorized: process.env.PG_SSL_REJECT_UNAUTHORIZED !== 'false' }
+    : false,
 });
 
 pool.on('error', (err) => {

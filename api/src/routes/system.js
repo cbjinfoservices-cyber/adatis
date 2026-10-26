@@ -66,7 +66,8 @@ router.get('/system/health', async (_req, res) => {
       apiVersion: API_VERSION,
       uptimeSec: uptimeSec(),
       checkedAt,
-      error: err.message,
+      // Sonde publique : aucun détail interne en production.
+      ...(process.env.NODE_ENV === 'production' ? {} : { error: err.message }),
     });
   }
 });

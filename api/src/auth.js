@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { q } = require('./db');
 const awx = require('./awx');
+const { encrypt, decrypt } = require('./secrets');
 
 /**
  * Sessions du portail.
@@ -187,8 +188,8 @@ const createSession = async ({ userId, username, tokens, req }) => {
       hashToken(token),
       userId,
       String(username || '').slice(0, 120),
-      String(tokens.access_token || ''),
-      String(tokens.refresh_token || ''),
+      encrypt(tokens.access_token),
+      encrypt(tokens.refresh_token),
       accessExpiresAt,
       refreshExpiresAt,
       expiresAt,
@@ -227,6 +228,11 @@ const SESSION_SELECT = `
     JOIN users u ON u.id = s.user_id
    WHERE s.id = $1`;
 
+/** Jetons Ascender chiffrés en base, en clair uniquement en mémoire. */
+const withPlainTokens = (row) => (row
+  ? { ...row, access_token: decrypt(row.access_token), refresh_token: decrypt(row.refresh_token) }
+  : null);
+
 const loadSession = async (token) => {
   if (!token) return null;
   const { rows } = await q(SESSION_SELECT, [hashToken(token)]);
@@ -236,7 +242,7 @@ const loadSession = async (token) => {
     await q('DELETE FROM auth_sessions WHERE id = $1', [row.session_id]);
     return null;
   }
-  return row;
+  return withPlainTokens(row);
 };
 
 /**
@@ -250,7 +256,7 @@ const latestSessionForUser = async (userId) => {
      ORDER BY s.last_seen_at DESC LIMIT 1`,
     [userId],
   );
-  return rows[0] || null;
+  return withPlainTokens(rows[0]);
 };
 
 const touchSession = (sessionId) => {
@@ -283,7 +289,7 @@ const ensureAccessToken = async (sessionRow) => {
       `UPDATE auth_sessions
           SET access_token = $2, refresh_token = $3, access_expires_at = $4
         WHERE id = $1`,
-      [sessionRow.session_id, nextAccess, nextRefresh, nextExpiry],
+      [sessionRow.session_id, encrypt(nextAccess), encrypt(nextRefresh), nextExpiry],
     );
     return nextAccess;
   } catch {

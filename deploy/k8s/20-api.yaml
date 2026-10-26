@@ -133,6 +133,12 @@ spec:
                   name: asp-auth
                   key: AWX_REDIRECT_URI
                   optional: true
+            - name: TOKEN_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: asp-auth
+                  key: TOKEN_ENCRYPTION_KEY
+                  optional: true
           readinessProbe:
             httpGet:
               path: /health

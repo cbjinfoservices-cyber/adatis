@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const compression = require('compression');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const { q } = require('./db');
 const { startProbing } = require('./healthMonitor');
 const {
@@ -20,29 +22,46 @@ const adminServicesRoutes = require('./routes/adminServices');
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
 
-// CORS : restreindre aux origines du portail (séparées par des virgules).
-// Par défaut, toutes les origines sont acceptées pour faciliter le premier déploiement.
-const allowed = (process.env.ALLOWED_ORIGINS || '*')
+const isProduction = process.env.NODE_ENV === 'production';
+
+// CORS : en production, le portail et l'API partagent la même origine (Ingress),
+// aucun en-tête CORS n'est donc nécessaire. ALLOWED_ORIGINS liste les origines
+// tierces autorisées (cookies compris) ; « * » ouvre la lecture sans cookie.
+const allowed = String(process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
 
 app.set('trust proxy', 1);
+app.disable('x-powered-by');
 
-app.use(cors({
-  origin: allowed.includes('*') ? true : allowed,
-  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-  credentials: true,
-}));
+app.use(helmet());
+if (allowed.includes('*')) {
+  app.use(cors({ origin: true, credentials: false, methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'] }));
+} else if (allowed.length) {
+  app.use(cors({ origin: allowed, credentials: true, methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'] }));
+}
 app.use(compression());
 app.use(express.json({ limit: '512kb' }));
+
+// Limitation de débit par adresse IP (mémoire du pod).
+const limit = (max, windowMs = 60 * 1000) => rateLimit({
+  windowMs,
+  limit: max,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'rate_limited' },
+});
+app.use('/api/auth/login', limit(Number(process.env.RATE_LIMIT_LOGIN || 20)));
+app.use('/api/auth/callback', limit(Number(process.env.RATE_LIMIT_LOGIN || 20)));
+app.use('/api', limit(Number(process.env.RATE_LIMIT_API || 600)));
 
 app.get('/health', async (_req, res) => {
   try {
     await q('SELECT 1');
     res.json({ status: 'ok', database: 'up', version: 1 });
   } catch (err) {
-    res.status(503).json({ status: 'degraded', database: 'down', message: err.message });
+    res.status(503).json({ status: 'degraded', database: 'down', ...(isProduction ? {} : { message: err.message }) });
   }
 });
 
@@ -91,8 +110,12 @@ app.use((_req, res) => {
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
+  // Corps JSON illisible : erreur du client, pas du serveur.
+  if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'invalid_json' });
+  if (err.type === 'entity.too.large') return res.status(413).json({ error: 'payload_too_large' });
   console.error('[api]', err.message);
-  res.status(500).json({ error: 'internal_error', message: err.message });
+  // En production, le détail reste dans les journaux, jamais dans la réponse.
+  return res.status(500).json({ error: 'internal_error', ...(isProduction ? {} : { message: err.message }) });
 });
 
 /** Démarre le serveur et les tâches de fond (sondes, purge des sessions). */
