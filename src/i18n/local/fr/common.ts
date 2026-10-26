@@ -1046,6 +1046,10 @@ const fr = {
   notif_awx_canceled_title: 'Job Ascender annulé',
   auth_login_misconfigured_title: "Connexion indisponible : configuration incomplète",
   auth_login_misconfigured_body: "Le SSO Ascender est exigé (AUTH_MODE=awx) mais sa configuration est incomplète. Le portail reste fermé tant que les variables manquantes ne sont pas renseignées côté serveur.",
+  awx_job_approval_pending: "En attente d'approbation : le job Ascender partira automatiquement après la décision finale.",
+  awx_job_approval_rejected: "Demande refusée : aucun job Ascender ne sera lancé.",
+  appr_self_forbidden: "Vous ne pouvez pas approuver votre propre demande.",
+  appr_already_decided: "Cette demande a déjà été décidée.",
 };
 
 export default fr;

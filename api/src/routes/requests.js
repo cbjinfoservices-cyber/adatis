@@ -3,6 +3,7 @@ const { q, withTransaction } = require('../db');
 const m = require('../mappers');
 const awx = require('../awx');
 const awxJobs = require('../awxJobs');
+const approvalFlow = require('../approvalFlow');
 const { authMode, ensureAccessToken } = require('../auth');
 
 const router = express.Router();
@@ -78,43 +79,53 @@ router.get('/requests/:id', async (req, res, next) => {
 
 router.post('/requests', async (req, res, next) => {
   try {
-    const { serviceId, environment = 'dev', payload = {}, tenantId = null } = req.body || {};
+    const { serviceId, environment = 'dev', payload = {} } = req.body || {};
     if (!serviceId) return res.status(400).json({ error: 'service_required' });
     if (!['dev', 'qa', 'staging', 'prod'].includes(environment)) {
       return res.status(400).json({ error: 'invalid_environment' });
     }
 
-    // Une session AWX impose l'utilisateur courant, jamais un identifiant client.
-    const userId = req.auth?.user?.id || req.body?.userId || null;
+    // Une session impose l'utilisateur et le tenant courants ; les valeurs du
+    // client ne sont acceptées qu'en mode développement (sans SSO).
+    const sessionUser = req.auth?.user || null;
+    const userId = sessionUser ? sessionUser.id : req.body?.userId || null;
+    const tenantId = sessionUser ? sessionUser.tenantId || null : req.body?.tenantId || null;
 
     const created = await withTransaction(async (client) => {
       const svc = await client.query('SELECT id, approval FROM services WHERE id = $1', [serviceId]);
       if (!svc.rows.length) return null;
+      const { approval } = svc.rows[0];
 
       const seq = await client.query('SELECT nextval(\'request_ref_seq\') AS n');
       const id = `REQ-${new Date().getFullYear()}-${seq.rows[0].n}`;
 
-      const result = await client.query(
+      await client.query(
         `INSERT INTO requests (id, service_id, user_id, tenant_id, environment, status, progress,
                                approval, approval_state, business_type, payload)
-         VALUES ($1,$2,$3,$4,$5,'queued',0,$6,$7,'custom',$8)
-         RETURNING id`,
-        [id, serviceId, userId, tenantId, environment, svc.rows[0].approval,
-          svc.rows[0].approval === 'none' ? 'not_required' : 'pending', JSON.stringify(payload)],
+         VALUES ($1,$2,$3,$4,$5,'queued',0,$6,$7,'custom',$8)`,
+        [id, serviceId, userId, tenantId, environment, approval,
+          approval === 'none' ? 'not_required' : 'pending', JSON.stringify(payload)],
       );
-      return result.rows[0].id;
+
+      // Service soumis à approbation : circuit créé, aucun lancement immédiat.
+      const approvalId = approval === 'none'
+        ? null
+        : await approvalFlow.createApproval(client, {
+          requestId: id, serviceId, approval, userId, tenantId, environment, payload,
+        });
+      return { id, approvalId };
     });
 
     if (!created) return res.status(404).json({ error: 'service_not_found' });
 
-    // Lancement du job template AWX avec le jeton de l'utilisateur connecté.
+    // Lancement du job Ascender avec le jeton de l'utilisateur connecté.
     let launch = null;
-    if (authMode() === 'awx' && req.auth?.session) {
+    if (!created.approvalId && authMode() === 'awx' && req.auth?.session) {
       const svc = await q(LAUNCH_SELECT, [serviceId]);
       if (svc.rows.length) {
         launch = await awxJobs.launchForRequest({
           request: {
-            id: created, serviceId, environment, payload,
+            id: created.id, serviceId, environment, payload,
           },
           service: svc.rows[0],
           session: req.auth.session,
@@ -123,8 +134,8 @@ router.post('/requests', async (req, res, next) => {
       }
     }
 
-    const { rows } = await q(`${REQUEST_SELECT} WHERE r.id = $1`, [created]);
-    return res.status(201).json({ ...m.request(rows[0]), awxLaunch: launch });
+    const { rows } = await q(`${REQUEST_SELECT} WHERE r.id = $1`, [created.id]);
+    return res.status(201).json({ ...m.request(rows[0]), awxLaunch: launch, approvalId: created.approvalId });
   } catch (err) { return next(err); }
 });
 
@@ -137,6 +148,9 @@ router.post('/requests/:id/awx/launch', async (req, res, next) => {
     const { rows } = await q(`${REQUEST_SELECT} WHERE r.id = $1`, [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'request_not_found' });
     if (rows[0].awx_job_id) return res.status(409).json({ error: 'awx_job_exists' });
+    if (!approvalFlow.LAUNCHABLE.includes(rows[0].approval_state)) {
+      return res.status(409).json({ error: `approval_${rows[0].approval_state}` });
+    }
 
     const svc = await q(LAUNCH_SELECT, [rows[0].service_id]);
     if (!svc.rows.length) return res.status(404).json({ error: 'service_not_found' });

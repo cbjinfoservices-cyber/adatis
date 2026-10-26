@@ -7,7 +7,8 @@ type Props = {
   launching: boolean;
   syncing: boolean;
   autoRefresh?: boolean;
-  launchBlocked: 'no_template' | 'auth_disabled' | 'no_token' | 'no_session' | 'rbac_forbidden' | null;
+  launchBlocked: 'no_template' | 'auth_disabled' | 'no_token' | 'no_session' | 'rbac_forbidden'
+    | 'approval_pending' | 'approval_rejected' | null;
   lastError: string | null;
   onLaunch: () => void;
   onSync: () => void;
@@ -19,6 +20,8 @@ const BLOCK_REASON: Record<string, string> = {
   no_token: 'awx_job_no_token',
   no_session: 'awx_job_no_token',
   rbac_forbidden: 'awx_job_no_rbac',
+  approval_pending: 'awx_job_approval_pending',
+  approval_rejected: 'awx_job_approval_rejected',
 };
 
 export default function AwxJobCard({

@@ -1,6 +1,8 @@
 const express = require('express');
 const { q, withTransaction } = require('../db');
 const m = require('../mappers');
+const approvalFlow = require('../approvalFlow');
+const { authMode } = require('../auth');
 
 const router = express.Router();
 
@@ -13,6 +15,26 @@ const APPROVAL_SELECT = `
   LEFT JOIN users u ON u.id = a.user_id
   LEFT JOIN tenants t ON t.id = a.tenant_id
 `;
+
+/**
+ * Auteur de la décision : l'utilisateur de la session. Sans SSO (mode
+ * développement), l'identifiant envoyé par le client est accepté.
+ */
+async function resolveActor(req) {
+  const user = req.auth?.user;
+  if (user) {
+    return {
+      id: user.id, name: user.name, roleFr: user.roleFr, roleEn: user.roleEn, enforced: true,
+    };
+  }
+  if (authMode() !== 'disabled') return null;
+  const actorId = String(req.body?.actorId || 'u-camille');
+  const { rows } = await q('SELECT id, name, role_fr, role_en FROM users WHERE id = $1', [actorId]);
+  const row = rows[0];
+  return row
+    ? { id: row.id, name: row.name, roleFr: row.role_fr, roleEn: row.role_en, enforced: false }
+    : { id: null, name: 'Utilisateur local', roleFr: '', roleEn: '', enforced: false };
+}
 
 async function levelsFor(ids) {
   if (!ids.length) return new Map();
@@ -62,75 +84,32 @@ router.get('/approvals/:id', async (req, res, next) => {
 
 router.post('/approvals/:id/decision', async (req, res, next) => {
   try {
-    const { decision, comment = '', actorId = 'u-camille' } = req.body || {};
+    const { decision, comment = '' } = req.body || {};
     if (!['approved', 'rejected'].includes(decision)) {
       return res.status(400).json({ error: 'invalid_decision' });
     }
 
-    const outcome = await withTransaction(async (client) => {
-      const approvalRes = await client.query(
-        `SELECT a.*, s.name_fr, s.name_en FROM approvals a
-         LEFT JOIN services s ON s.id = a.service_id
-         WHERE a.id = $1 FOR UPDATE`,
-        [req.params.id],
-      );
-      if (!approvalRes.rows.length) return { error: 'approval_not_found' };
-      const approval = approvalRes.rows[0];
+    const actor = await resolveActor(req);
+    if (!actor) return res.status(401).json({ error: 'auth_required' });
 
-      const actorRes = await client.query('SELECT id, name, role_fr, role_en FROM users WHERE id = $1', [actorId]);
-      const actor = actorRes.rows[0] || { id: null, name: 'Camille Laurent', role_fr: 'Manager', role_en: 'Manager' };
+    const outcome = await withTransaction((client) => approvalFlow.decide(client, {
+      approvalId: req.params.id,
+      decision,
+      comment: String(comment).slice(0, 1000),
+      actor,
+    }));
+    if (outcome.error) return res.status(outcome.status).json({ error: outcome.error });
 
-      const levelsRes = await client.query(
-        'SELECT * FROM approval_levels WHERE approval_id = $1 ORDER BY sort_order',
-        [approval.id],
-      );
-      const levels = levelsRes.rows;
-      const current = levels.find((l) => l.status === 'current');
-
-      if (!current) return { error: 'no_current_level' };
-
-      await client.query(
-        `UPDATE approval_levels
-         SET status = $1, approver = $2, decided_at = now(), comment_fr = $3, comment_en = $3
-         WHERE id = $4`,
-        [decision, actor.name, comment, current.id],
-      );
-
-      const ended = decision === 'rejected';
-      let nextLevel = null;
-      if (!ended) {
-        nextLevel = levels.find((l) => l.sort_order > current.sort_order);
-      }
-
-      if (nextLevel) {
-        await client.query('UPDATE approval_levels SET status = \'current\' WHERE id = $1', [nextLevel.id]);
-        await client.query('UPDATE approvals SET my_turn = true WHERE id = $1', [approval.id]);
-      } else {
-        await client.query(
-          `UPDATE approvals SET decision = $1, decided_at = now(), my_turn = false WHERE id = $2`,
-          [decision, approval.id],
-        );
-      }
-
-      await client.query(
-        `INSERT INTO audit_events (id, at, actor_id, actor_role_fr, actor_role_en, level, decision,
-                                   service_id, ref, tenant_id, comment_fr, comment_en, risk)
-         VALUES ($1, now(), $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11)`,
-        [
-          `AU-${Date.now()}`, actor.id, actor.role_fr, actor.role_en, current.key,
-          decision, approval.service_id, approval.request_ref, approval.tenant_id, comment, approval.risk,
-        ],
-      );
-
-      return { ok: true, approvalId: approval.id, nextLevel: nextLevel ? nextLevel.key : null };
-    });
-
-    if (outcome.error === 'approval_not_found') return res.status(404).json(outcome);
-    if (outcome.error) return res.status(409).json(outcome);
+    // Approbation finale : le job part avec le jeton du demandeur.
+    const launch = outcome.granted ? await approvalFlow.launchAfterApproval(outcome.requestId) : null;
 
     const { rows } = await q(`${APPROVAL_SELECT} WHERE a.id = $1`, [req.params.id]);
     const levels = await levelsFor([req.params.id]);
-    return res.json({ ...outcome, approval: m.approval(rows[0], levels.get(req.params.id) || []) });
+    return res.json({
+      ...outcome,
+      launch,
+      approval: m.approval(rows[0], levels.get(req.params.id) || []),
+    });
   } catch (err) { return next(err); }
 });
 

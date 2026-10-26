@@ -239,6 +239,20 @@ const loadSession = async (token) => {
   return row;
 };
 
+/**
+ * Session encore valide la plus récente d'un utilisateur : permet de lancer
+ * un job avec SON jeton après une approbation, même s'il n'est pas connecté.
+ */
+const latestSessionForUser = async (userId) => {
+  if (!userId) return null;
+  const { rows } = await q(
+    `${SESSION_SELECT.replace('WHERE s.id = $1', 'WHERE s.user_id = $1 AND s.expires_at > now()')}
+     ORDER BY s.last_seen_at DESC LIMIT 1`,
+    [userId],
+  );
+  return rows[0] || null;
+};
+
 const touchSession = (sessionId) => {
   q('UPDATE auth_sessions SET last_seen_at = now() WHERE id = $1', [sessionId]).catch(() => {});
 };
@@ -391,6 +405,7 @@ module.exports = {
   logEvent,
   createSession,
   loadSession,
+  latestSessionForUser,
   destroySession,
   ensureAccessToken,
   attachSession,

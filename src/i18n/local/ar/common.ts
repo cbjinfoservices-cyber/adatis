@@ -787,6 +787,10 @@ const ar = {
   notif_awx_canceled_title: 'أُلغيت مهمة Ascender',
   auth_login_misconfigured_title: "تسجيل الدخول غير متاح: إعدادات ناقصة",
   auth_login_misconfigured_body: "الدخول الموحد عبر Ascender مطلوب (AUTH_MODE=awx) لكن إعداداته ناقصة. تبقى البوابة مغلقة حتى يتم ضبط المتغيرات الناقصة على الخادم.",
+  awx_job_approval_pending: "بانتظار الموافقة: ستبدأ مهمة Ascender تلقائياً بعد القرار النهائي.",
+  awx_job_approval_rejected: "تم رفض الطلب: لن تُشغَّل أي مهمة Ascender.",
+  appr_self_forbidden: "لا يمكنك الموافقة على طلبك الخاص.",
+  appr_already_decided: "تم البت في هذا الطلب مسبقاً.",
 };
 
 export default ar;

@@ -787,6 +787,10 @@ const es = {
   notif_awx_canceled_title: 'Job Ascender cancelado',
   auth_login_misconfigured_title: "Inicio de sesión no disponible: configuración incompleta",
   auth_login_misconfigured_body: "Se exige el SSO de Ascender (AUTH_MODE=awx) pero su configuración está incompleta. El portal permanece cerrado hasta que se definan las variables que faltan en el servidor.",
+  awx_job_approval_pending: "Pendiente de aprobación: el job de Ascender se lanzará automáticamente tras la decisión final.",
+  awx_job_approval_rejected: "Solicitud rechazada: no se lanzará ningún job de Ascender.",
+  appr_self_forbidden: "No puedes aprobar tu propia solicitud.",
+  appr_already_decided: "Esta solicitud ya ha sido decidida.",
 };
 
 export default es;

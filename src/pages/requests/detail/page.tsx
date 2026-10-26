@@ -21,7 +21,8 @@ const nowTime = () => new Date().toLocaleTimeString('fr-FR', { hour12: false });
 
 const ACTIVE_AWX = ['new', 'pending', 'waiting', 'running', 'queued'];
 
-type AwxBlocked = 'no_template' | 'auth_disabled' | 'no_token' | 'no_session' | 'rbac_forbidden' | null;
+type AwxBlocked = 'no_template' | 'auth_disabled' | 'no_token' | 'no_session' | 'rbac_forbidden'
+  | 'approval_pending' | 'approval_rejected' | null;
 
 export default function RequestDetailPage() {
   const { id } = useParams();
@@ -75,6 +76,10 @@ export default function RequestDetailPage() {
 
   // Un job AWX suit son état réel : la simulation locale est désactivée.
   const hasAwxJob = Boolean(awx?.jobId);
+  // Job bloqué tant que l'approbation n'est pas accordée (contrôlé aussi par l'API).
+  let approvalBlock: AwxBlocked = null;
+  if (request?.approvalState === 'pending') approvalBlock = 'approval_pending';
+  else if (request?.approvalState === 'rejected') approvalBlock = 'approval_rejected';
   const awxActive = hasAwxJob && ACTIVE_AWX.includes(String(awx?.status || '').toLowerCase());
   const isLive = status === 'running' && !paused && !hasAwxJob;
 
@@ -123,7 +128,7 @@ export default function RequestDetailPage() {
     } catch (err) {
       const payload = err instanceof ApiError ? (err.detail as { error?: string; message?: string }) : null;
       const code = payload?.error || '';
-      if (code === 'no_template' || code === 'awx_disabled' || code === 'no_token' || code === 'no_session' || code === 'rbac_forbidden') {
+      if (['no_template', 'awx_disabled', 'no_token', 'no_session', 'rbac_forbidden', 'approval_pending', 'approval_rejected'].includes(code)) {
         setAwxBlocked(code as Exclude<AwxBlocked, null>);
       } else {
         setAwxError(payload?.message || t('awx_job_launch_failed'));
@@ -347,11 +352,11 @@ export default function RequestDetailPage() {
             )}
             <AwxJobCard
               job={awx}
-              canLaunch={!hasAwxJob && status !== 'success'}
+              canLaunch={!hasAwxJob && status !== 'success' && !approvalBlock}
               launching={awxLaunching}
               syncing={awxSyncing}
               autoRefresh={awxActive}
-              launchBlocked={awxBlocked}
+              launchBlocked={awxBlocked || approvalBlock}
               lastError={awxError}
               onLaunch={() => { void launchAwx(); }}
               onSync={() => { void syncAwx(); }}

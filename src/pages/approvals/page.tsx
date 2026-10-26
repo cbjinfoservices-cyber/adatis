@@ -5,7 +5,7 @@ import { ErrorBlock, LoadingBlock } from '@/components/base/DataState';
 import ApprovalListItem from '@/pages/approvals/components/ApprovalListItem';
 import ApprovalDetail from '@/pages/approvals/components/ApprovalDetail';
 import DecisionAuditLog from '@/pages/approvals/components/DecisionAuditLog';
-import { api } from '@/utils/api';
+import { api, ApiError } from '@/utils/api';
 import { loadStore, reloadStore, useStore } from '@/utils/store';
 import { hoursLeft, isUrgent } from '@/utils/approvals';
 import { getRequest } from '@/utils/executions';
@@ -59,8 +59,11 @@ export default function ApprovalsPage() {
       setToast(kind === 'approve'
         ? t('appr_toast_approved', { ref: ref?.requestId || id })
         : t('appr_toast_rejected', { ref: ref?.requestId || id }));
-    } catch {
-      setToast(t('data_error_title'));
+    } catch (err) {
+      const code = err instanceof ApiError ? (err.detail as { error?: string } | null)?.error : '';
+      if (code === 'self_approval_forbidden') setToast(t('appr_self_forbidden'));
+      else if (code === 'approval_already_decided') setToast(t('appr_already_decided'));
+      else setToast(t('data_error_title'));
     } finally {
       setDeciding(false);
     }
