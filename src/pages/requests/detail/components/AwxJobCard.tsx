@@ -10,6 +10,8 @@ type Props = {
   launchBlocked: 'no_template' | 'auth_disabled' | 'no_token' | 'no_session' | 'rbac_forbidden'
     | 'approval_pending' | 'approval_rejected' | null;
   lastError: string | null;
+  /** Approuvée mais non lancée : le demandeur doit lancer le job. */
+  awaitingRequester?: boolean;
   onLaunch: () => void;
   onSync: () => void;
 };
@@ -25,7 +27,7 @@ const BLOCK_REASON: Record<string, string> = {
 };
 
 export default function AwxJobCard({
-  job, canLaunch, launching, syncing, autoRefresh = false, launchBlocked, lastError, onLaunch, onSync,
+  job, canLaunch, launching, syncing, autoRefresh = false, launchBlocked, lastError, awaitingRequester = false, onLaunch, onSync,
 }: Props) {
   const { t, i18n } = useTranslation();
   const lang = i18n.language;
@@ -120,7 +122,9 @@ export default function AwxJobCard({
         <>
           <div className="mt-3 rounded-lg border border-dashed border-background-300 bg-background-100 p-3">
             <p className="text-xs text-foreground-700 leading-relaxed">
-              {launchBlocked ? t(BLOCK_REASON[launchBlocked] || 'awx_job_no_template') : t('awx_job_none')}
+              {launchBlocked
+                ? t(BLOCK_REASON[launchBlocked] || 'awx_job_no_template')
+                : t(awaitingRequester ? 'awx_job_awaiting_requester' : 'awx_job_none')}
             </p>
             {lastError && (
               <p className="mt-1.5 font-label text-[10px] text-accent-700 break-words" dir="ltr">{lastError}</p>

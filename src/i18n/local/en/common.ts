@@ -1059,6 +1059,7 @@ const en = {
   brand_awx_org_placeholder: "e.g. Infra",
   brand_awx_org_hint: "Members of this Ascender organization get this tenant when they sign in: their requests belong to it and the tenant's approvers see them.",
   brand_awx_org_taken: "This Ascender organization is already linked to another tenant.",
+  awx_job_awaiting_requester: "Request approved, but your Ascender token was no longer usable: launch the job yourself.",
 };
 
 export default en;

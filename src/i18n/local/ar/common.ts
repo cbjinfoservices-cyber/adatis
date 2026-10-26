@@ -1059,6 +1059,7 @@ const ar = {
   brand_awx_org_placeholder: "مثال: Infra",
   brand_awx_org_hint: "يحصل أعضاء مؤسسة Ascender هذه على هذا المستأجر عند تسجيل الدخول: تُربط طلباتهم به ويراها الموافقون في المستأجر.",
   brand_awx_org_taken: "مؤسسة Ascender هذه مرتبطة بالفعل بمستأجر آخر.",
+  awx_job_awaiting_requester: "تمت الموافقة على الطلب، لكن رمز Ascender الخاص بك لم يعد صالحاً: شغّل المهمة بنفسك.",
 };
 
 export default ar;

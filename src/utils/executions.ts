@@ -35,6 +35,7 @@ export interface RequestItem {
   durationSec: number;
   approval: string;
   approvalState: string;
+  awaitingRequester?: boolean;
   businessType: string;
   awx?: AwxJob | null;
 }

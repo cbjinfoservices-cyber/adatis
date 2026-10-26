@@ -56,6 +56,8 @@ function request(row) {
     approval: row.approval,
     approvalState: row.approval_state,
     businessType: row.business_type,
+    // Approuvée mais non lancée faute de jeton du demandeur : à lancer par lui.
+    awaitingRequester: !row.awx_job_id && row.awx_status === 'awaiting_requester',
     awx: row.awx_job_id ? {
       jobId: Number(row.awx_job_id),
       jobUrl: row.awx_job_url || '',

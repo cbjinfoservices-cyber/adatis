@@ -140,9 +140,16 @@ const LAUNCH_SELECT = `
          awx_workflow_job_template_id, awx_workflow_job_template_name
     FROM services WHERE id = $1`;
 
+/** Demande approuvée mais impossible à lancer au nom du demandeur : il la lancera lui-même. */
+const awaitRequester = async (requestId) => {
+  await q("UPDATE requests SET awx_status = 'awaiting_requester' WHERE id = $1 AND awx_job_id IS NULL", [requestId])
+    .catch(() => {});
+};
+
 /**
- * Après l'approbation finale : lance le job avec la session encore valide du
- * demandeur. Sans session, le demandeur le lancera depuis sa demande.
+ * Après l'approbation finale : lance le job avec une session du demandeur
+ * (valide, ou expirée depuis moins du délai de grâce : son jeton est alors
+ * renouvelé). Sinon, le demandeur le lancera depuis sa demande.
  */
 const launchAfterApproval = async (requestId) => {
   const { rows } = await q('SELECT * FROM requests WHERE id = $1', [requestId]);
@@ -150,12 +157,15 @@ const launchAfterApproval = async (requestId) => {
   if (!request || request.awx_job_id) return { skipped: 'already_launched' };
 
   const session = await latestSessionForUser(request.user_id);
-  if (!session) return { skipped: 'requester_session_missing' };
+  if (!session) {
+    await awaitRequester(request.id);
+    return { skipped: 'requester_session_missing' };
+  }
 
   const service = await q(LAUNCH_SELECT, [request.service_id]);
   if (!service.rows.length) return { skipped: 'service_not_found' };
 
-  return awxJobs.launchForRequest({
+  const launch = await awxJobs.launchForRequest({
     request: {
       id: request.id, serviceId: request.service_id, environment: request.environment, payload: request.payload,
     },
@@ -163,6 +173,9 @@ const launchAfterApproval = async (requestId) => {
     session,
     user: sessionUser(session),
   });
+  // Jeton du demandeur refusé ou expiré : lancement manuel par le demandeur.
+  if (launch?.error || launch?.skipped === 'no_token') await awaitRequester(request.id);
+  return launch;
 };
 
 module.exports = {

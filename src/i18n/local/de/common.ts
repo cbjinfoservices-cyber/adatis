@@ -1059,6 +1059,7 @@ const de = {
   brand_awx_org_placeholder: "z. B. Infra",
   brand_awx_org_hint: "Mitglieder dieser Ascender-Organisation erhalten bei der Anmeldung diesen Mandanten: Ihre Anfragen gehören dazu und die Genehmigenden des Mandanten sehen sie.",
   brand_awx_org_taken: "Diese Ascender-Organisation ist bereits mit einem anderen Mandanten verknüpft.",
+  awx_job_awaiting_requester: "Anfrage genehmigt, aber dein Ascender-Token war nicht mehr gültig: Starte den Job selbst.",
 };
 
 export default de;

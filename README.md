@@ -51,11 +51,15 @@ Les tests de l'API (`api/test/`) tournent sur un vrai PostgreSQL en mémoire
 - **Périmètre** : un demandeur ne voit que ses demandes ; un approbateur celles
   de son tenant ; un administrateur tout.
 - **Approbation** : un service soumis à approbation ne lance rien avant la
-  décision finale ; le job part alors avec le jeton du demandeur. Personne ne
-  peut approuver sa propre demande.
+  décision finale ; le job part alors avec le jeton du demandeur, même déconnecté
+  depuis moins de `SESSION_LAUNCH_GRACE_DAYS` jours (sinon il le lance lui-même).
+  Personne ne peut approuver sa propre demande.
 - **Formulaires** : validés côté serveur ; seuls les champs du schéma partent
   dans les `extra_vars` Ascender.
-- **Jetons Ascender** : chiffrés en base (AES-256-GCM, `TOKEN_ENCRYPTION_KEY`).
+- **Jetons Ascender et champs mot de passe** : chiffrés en base (AES-256-GCM,
+  `TOKEN_ENCRYPTION_KEY`) ; les mots de passe ne sont déchiffrés que pour les
+  `extra_vars` Ascender.
+- **Tenant** : déduit de l'organisation Ascender reliée au tenant (Tenants & branding).
 
 ## Configuration principale (API)
 
@@ -69,5 +73,6 @@ Les tests de l'API (`api/test/`) tournent sur un vrai PostgreSQL en mémoire
 | `ALLOWED_ORIGINS` | Origines tierces autorisées (vide : même origine) |
 | `PG_SSL`, `PG_SSL_REJECT_UNAUTHORIZED` | TLS vers PostgreSQL (certificat vérifié par défaut) |
 | `RATE_LIMIT_API`, `RATE_LIMIT_LOGIN` | Requêtes par minute et par IP (600 / 20) |
+| `SESSION_LAUNCH_GRACE_DAYS` | Jours pendant lesquels une session expirée peut encore lancer un job approuvé (7) |
 
 Le détail du déploiement Kubernetes est dans `deploy/README.md`.

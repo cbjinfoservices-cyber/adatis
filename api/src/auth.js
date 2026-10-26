@@ -238,26 +238,44 @@ const loadSession = async (token) => {
   const { rows } = await q(SESSION_SELECT, [hashToken(token)]);
   const row = rows[0];
   if (!row) return null;
-  if (new Date(row.expires_at).getTime() < Date.now()) {
-    await q('DELETE FROM auth_sessions WHERE id = $1', [row.session_id]);
-    return null;
-  }
+  // Session expirée : refusée pour l'authentification. La ligne est conservée
+  // pendant le délai de grâce (lancement après approbation), puis purgée.
+  if (new Date(row.expires_at).getTime() < Date.now()) return null;
   return withPlainTokens(row);
 };
 
+/** Jours pendant lesquels une session expirée peut encore servir à lancer un job approuvé. */
+const launchGraceDays = () => {
+  const parsed = Number(process.env.SESSION_LAUNCH_GRACE_DAYS);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 7;
+};
+
 /**
- * Session encore valide la plus récente d'un utilisateur : permet de lancer
- * un job avec SON jeton après une approbation, même s'il n'est pas connecté.
+ * Session du demandeur pour lancer un job après approbation, avec SES droits
+ * Ascender même s'il n'est plus connecté : une session valide de préférence,
+ * sinon une session expirée depuis moins du délai de grâce dont le jeton de
+ * renouvellement est encore utilisable.
  */
 const latestSessionForUser = async (userId) => {
   if (!userId) return null;
   const { rows } = await q(
-    `${SESSION_SELECT.replace('WHERE s.id = $1', 'WHERE s.user_id = $1 AND s.expires_at > now()')}
-     ORDER BY s.last_seen_at DESC LIMIT 1`,
-    [userId],
+    `${SESSION_SELECT.replace(
+      'WHERE s.id = $1',
+      `WHERE s.user_id = $1
+         AND (s.expires_at > now()
+              OR (s.refresh_token <> '' AND s.expires_at > now() - make_interval(days => $2)))`,
+    )}
+     ORDER BY (s.expires_at > now()) DESC, s.last_seen_at DESC LIMIT 1`,
+    [userId, launchGraceDays()],
   );
   return withPlainTokens(rows[0]);
 };
+
+/** Purge des sessions expirées depuis plus que le délai de grâce. */
+const purgeSessions = () => q(
+  'DELETE FROM auth_sessions WHERE expires_at < now() - make_interval(days => $1)',
+  [launchGraceDays()],
+);
 
 const touchSession = (sessionId) => {
   q('UPDATE auth_sessions SET last_seen_at = now() WHERE id = $1', [sessionId]).catch(() => {});
@@ -433,6 +451,7 @@ module.exports = {
   createSession,
   loadSession,
   latestSessionForUser,
+  purgeSessions,
   destroySession,
   ensureAccessToken,
   attachSession,

@@ -358,6 +358,7 @@ export default function RequestDetailPage() {
               autoRefresh={awxActive}
               launchBlocked={awxBlocked || approvalBlock}
               lastError={awxError}
+              awaitingRequester={Boolean(request.awaitingRequester)}
               onLaunch={() => { void launchAwx(); }}
               onSync={() => { void syncAwx(); }}
             />

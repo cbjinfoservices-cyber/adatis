@@ -6,7 +6,7 @@ const rateLimit = require('express-rate-limit');
 const { q } = require('./db');
 const { startProbing } = require('./healthMonitor');
 const {
-  attachSession, requireAuth, requireRole, authMode,
+  attachSession, requireAuth, requireRole, authMode, purgeSessions,
 } = require('./auth');
 
 const authRoutes = require('./routes/auth');
@@ -132,9 +132,9 @@ function start() {
     }
     // Sonde interne toutes les 60 s : alimente l'historique 24 h même sans visiteur.
     stopProbing = startProbing();
-    // Purge des sessions expirées (toutes les heures, sans bloquer l'arrêt).
+    // Purge horaire des sessions expirées au-delà du délai de grâce.
     setInterval(() => {
-      q('DELETE FROM auth_sessions WHERE expires_at < now()').catch(() => {});
+      purgeSessions().catch(() => {});
     }, 3600 * 1000).unref();
   });
 
