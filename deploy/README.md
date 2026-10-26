@@ -28,15 +28,43 @@ kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main
 ## 2. Déploiement
 
 ```bash
-# cluster local (images chargées automatiquement)
-DOMAIN=portal.local ./deploy/deploy.sh
-
-# registre distant
+# production : certificat Let's Encrypt automatique (cert-manager requis)
 REGISTRY=registry.example.com/asp TAG=1.0.0 DOMAIN=portal.acme.fr \
-  CERT_MANAGER_ISSUER=letsencrypt ./deploy/deploy.sh
+  LETSENCRYPT_EMAIL=ops@acme.fr ./deploy/deploy.sh
+
+# certificat fourni (PKI interne)
+DOMAIN=portal.acme.fr TLS_CERT_FILE=portal.crt TLS_KEY_FILE=portal.key ./deploy/deploy.sh
+
+# cluster local (kind) : certificat local, par ex. avec mkcert
+mkcert -cert-file portal.crt -key-file portal.key portal.local
+DOMAIN=portal.local TLS_CERT_FILE=portal.crt TLS_KEY_FILE=portal.key ./deploy/deploy.sh
 ```
 
 Options : `--skip-build`, `--reset-db`, `--no-ingress`. Voir `./deploy/deploy.sh --help`.
+
+### HTTPS (obligatoire)
+
+Dès que `DOMAIN` est fourni, le script **refuse de déployer sans certificat**
+(vérifié avant la construction des images). Sources acceptées, par priorité :
+
+| Source | Variables |
+|--------|-----------|
+| Certificat fourni | `TLS_CERT_FILE`, `TLS_KEY_FILE` (PEM) → secret `asp-portal-tls` |
+| ClusterIssuer existant | `CERT_MANAGER_ISSUER` |
+| Let's Encrypt automatique | `LETSENCRYPT_EMAIL` (`LETSENCRYPT_STAGING=true` pour tester) : crée le ClusterIssuer `asp-letsencrypt` (HTTP-01) |
+| Secret déjà présent | `asp-portal-tls` dans le namespace |
+
+L'Ingress redirige tout HTTP vers HTTPS (308), le cookie de session est
+`Secure` (`COOKIE_SECURE=true`), et le portail comme l'API envoient
+`Strict-Transport-Security`. Avec cert-manager, le script attend l'émission du
+certificat puis teste `https://<DOMAIN>/api/system/health`.
+
+**Vers Ascender** : `AWX_BASE_URL` doit être en `https://` (refus sinon, sauf
+`AWX_ALLOW_HTTP=true`). Si Ascender est signé par une autorité interne,
+`ASCENDER_CA_FILE=ca.pem` l'ajoute aux autorités de confiance de l'API
+(ConfigMap `asp-ascender-ca`, `NODE_EXTRA_CA_CERTS`).
+
+`--no-ingress` (accès par `port-forward`) reste en HTTP sur `localhost` : réservé aux tests.
 
 Le script :
 
@@ -47,8 +75,8 @@ Le script :
 5. déploie PostgreSQL, attend `pg_isready` ;
 6. **lance le Job `asp-db-migrate`** et attend sa réussite ;
 7. déploie l'API puis le frontend ;
-8. applique l'Ingress si `DOMAIN` est fourni ;
-9. teste `/api/services` depuis un pod et affiche les accès.
+8. applique l'Ingress HTTPS si `DOMAIN` est fourni (certificat obligatoire, voir ci-dessous) ;
+9. teste `/api/system/health` depuis un pod, puis en HTTPS depuis l'extérieur, et affiche les accès.
 
 ### Migrations SQL automatiques
 
@@ -244,4 +272,5 @@ kubectl -n asp-portal exec postgres-0 -- pg_dump -U asp asp_portal > backup.sql
 - Le mot de passe n'est jamais dans le dépôt : secret Kubernetes généré au déploiement.
 - L'API est le seul composant qui parle SQL ; le navigateur ne voit que du JSON.
 - **Authentification** : `AUTH_MODE=awx` active le SSO AWX (OAuth2) avec cookie de session `httpOnly`, jetons AWX stockés côté serveur et rôles déduits des organisations/équipes AWX. Laisse `AUTH_MODE=disabled` uniquement pour une démonstration interne ou un cluster isolé.
-- **À faire avant une mise en production réelle** : restreindre `ALLOWED_ORIGINS`, activer TLS entre l'API et Postgres, et remplacer le compte `asp` par un rôle applicatif à privilèges limités.
+- **HTTPS** : obligatoire côté navigateur (Ingress, redirection, HSTS, cookie `Secure`) et vers Ascender.
+- **À faire avant une mise en production réelle** : activer TLS entre l'API et Postgres (`PG_SSL=true`, aujourd'hui trafic interne au cluster), et remplacer le compte `asp` par un rôle applicatif à privilèges limités.

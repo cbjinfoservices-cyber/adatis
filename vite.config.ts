@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
 import AutoImport from "unplugin-auto-import/vite";
 // import { readdyJsxRuntimeProxyPlugin } from "./vite.jsx-runtime-proxy";
 
@@ -84,5 +85,9 @@ export default defineConfig({
     host: "0.0.0.0",
     // Développement : l'API est servie sur la même origine, comme derrière l'Ingress.
     proxy: { "/api": process.env.VITE_API_PROXY || "http://127.0.0.1:8080" },
+    // HTTPS local (npm run dev:local -- --https) : certificat fourni par le script.
+    https: process.env.VITE_HTTPS_CERT && process.env.VITE_HTTPS_KEY
+      ? { cert: readFileSync(process.env.VITE_HTTPS_CERT), key: readFileSync(process.env.VITE_HTTPS_KEY) }
+      : undefined,
   },
 });

@@ -16,7 +16,14 @@
 #   API_URL             URL de l'API vue par le navigateur (défaut : /api)
 #   ALLOWED_ORIGINS     origines tierces autorisées (défaut : vide = même origine via l'Ingress)
 #   DB_NAME / DB_USER   identifiants de la base (défaut : asp_portal / asp)
-#   CERT_MANAGER_ISSUER nom d'un ClusterIssuer cert-manager (optionnel)
+#   HTTPS (obligatoire dès que DOMAIN est fourni), une des sources suivantes :
+#     LETSENCRYPT_EMAIL   certificat Let's Encrypt automatique via cert-manager
+#                         (LETSENCRYPT_STAGING=true pour l'environnement de test)
+#     CERT_MANAGER_ISSUER nom d'un ClusterIssuer cert-manager existant
+#     TLS_CERT_FILE / TLS_KEY_FILE  certificat et clé PEM fournis
+#     ou un secret TLS asp-portal-tls déjà présent dans le namespace
+#   ASCENDER_CA_FILE    certificat PEM de l'autorité interne qui signe Ascender
+#   AWX_ALLOW_HTTP      true pour accepter un AWX_BASE_URL en http:// (déconseillé)
 #   FORCE_DB_PASSWORD   impose un mot de passe (sinon réutilisé/créé automatiquement)
 #   ALERT_EMAIL_TO      destinataire des alertes de disponibilité (défaut : vide)
 #   ALERT_EMAIL_FROM    expéditeur des alertes (défaut : alertes@<domaine Resend>)
@@ -44,6 +51,12 @@ ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-}"
 DB_NAME="${DB_NAME:-asp_portal}"
 DB_USER="${DB_USER:-asp}"
 CERT_MANAGER_ISSUER="${CERT_MANAGER_ISSUER:-}"
+LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-}"
+LETSENCRYPT_STAGING="${LETSENCRYPT_STAGING:-false}"
+TLS_CERT_FILE="${TLS_CERT_FILE:-}"
+TLS_KEY_FILE="${TLS_KEY_FILE:-}"
+TLS_SECRET="asp-portal-tls"
+TLS_MODE=""
 ALERT_EMAIL_TO="${ALERT_EMAIL_TO:-}"
 ALERT_EMAIL_FROM="${ALERT_EMAIL_FROM:-}"
 RESEND_API_KEY="${RESEND_API_KEY:-}"
@@ -76,7 +89,7 @@ for arg in "$@"; do
     --skip-build) SKIP_BUILD=true ;;
     --reset-db)   RESET_DB=true ;;
     --no-ingress) WITH_INGRESS=false ;;
-    -h|--help)    sed -n '2,25p' "$0"; exit 0 ;;
+    -h|--help)    sed -n '2,/^# =====/p' "$0"; exit 0 ;;
     *)            fail "Option inconnue : $arg" ;;
   esac
 done
@@ -89,6 +102,43 @@ command -v kubectl >/dev/null 2>&1 || fail "kubectl est introuvable"
 kubectl cluster-info >/dev/null 2>&1 || fail "Aucun cluster joignable (vérifie ton kubeconfig)"
 command -v docker >/dev/null 2>&1 || fail "docker est introuvable"
 ok "Cluster : $(kubectl config current-context)"
+
+# HTTPS : vérifié avant toute construction d'image. Un portail exposé sur un
+# domaine n'est jamais déployé sans certificat (le contrôleur servirait sinon
+# son « Fake Certificate » sans rien signaler).
+if [ "${WITH_INGRESS}" = true ] && [ -n "${DOMAIN}" ]; then
+  if [ -n "${TLS_CERT_FILE}" ] || [ -n "${TLS_KEY_FILE}" ]; then
+    [ -f "${TLS_CERT_FILE}" ] || fail "TLS_CERT_FILE introuvable : ${TLS_CERT_FILE}"
+    [ -f "${TLS_KEY_FILE}" ] || fail "TLS_KEY_FILE introuvable : ${TLS_KEY_FILE}"
+    TLS_MODE="files"
+  elif [ -n "${CERT_MANAGER_ISSUER}" ]; then
+    kubectl get clusterissuer "${CERT_MANAGER_ISSUER}" >/dev/null 2>&1 \
+      || fail "ClusterIssuer ${CERT_MANAGER_ISSUER} introuvable (cert-manager installé ?)"
+    TLS_MODE="issuer"
+  elif [ -n "${LETSENCRYPT_EMAIL}" ]; then
+    kubectl get crd clusterissuers.cert-manager.io >/dev/null 2>&1 \
+      || fail "cert-manager n'est pas installé : https://cert-manager.io/docs/installation/ (ou fournis TLS_CERT_FILE / TLS_KEY_FILE)"
+    TLS_MODE="letsencrypt"
+    CERT_MANAGER_ISSUER="asp-letsencrypt"
+  elif kubectl -n "${NAMESPACE}" get secret "${TLS_SECRET}" >/dev/null 2>&1; then
+    TLS_MODE="existing"
+  else
+    fail "HTTPS obligatoire pour ${DOMAIN} : fournis LETSENCRYPT_EMAIL, CERT_MANAGER_ISSUER, TLS_CERT_FILE/TLS_KEY_FILE ou un secret ${TLS_SECRET}"
+  fi
+  ok "HTTPS : certificat via ${TLS_MODE}"
+fi
+
+# Portail -> Ascender : jetons et mots de passe y transitent, HTTPS exigé.
+case "${AWX_BASE_URL:-}" in
+  http://*)
+    [ "${AWX_ALLOW_HTTP:-false}" = true ] \
+      || fail "AWX_BASE_URL doit être en https:// (jetons et mots de passe y transitent) ; AWX_ALLOW_HTTP=true pour passer outre"
+    warn "AWX_BASE_URL en HTTP accepté (AWX_ALLOW_HTTP=true)"
+    ;;
+esac
+if [ -n "${ASCENDER_CA_FILE:-}" ]; then
+  [ -f "${ASCENDER_CA_FILE}" ] || fail "ASCENDER_CA_FILE introuvable : ${ASCENDER_CA_FILE}"
+fi
 
 CLUSTER_KIND="$(kubectl config view --minify -o jsonpath='{.contexts[0].context.cluster}' 2>/dev/null || true)"
 IS_KIND=false
@@ -144,8 +194,19 @@ fi
 log "Application du namespace ${NAMESPACE}"
 kubectl apply -f "${ROOT_DIR}/deploy/k8s/00-namespace.yaml"
 
+if [ -n "${ASCENDER_CA_FILE:-}" ]; then
+  log "Autorité de certification d'Ascender (ConfigMap asp-ascender-ca)"
+  kubectl -n "${NAMESPACE}" create configmap asp-ascender-ca \
+    --from-file=ca.crt="${ASCENDER_CA_FILE}" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+fi
+
 log "Mise à jour de la configuration applicative"
+# Derrière l'Ingress HTTPS, le cookie de session est toujours « Secure ».
+COOKIE_SECURE=""
+if [ "${WITH_INGRESS}" = true ] && [ -n "${DOMAIN}" ]; then COOKIE_SECURE="true"; fi
 kubectl -n "${NAMESPACE}" create configmap asp-config \
+  --from-literal=COOKIE_SECURE="${COOKIE_SECURE}" \
   --from-literal=ALLOWED_ORIGINS="${ALLOWED_ORIGINS}" \
   --from-literal=API_URL="${API_URL}" \
   --from-literal=ALERT_EMAIL_TO="${ALERT_EMAIL_TO}" \
@@ -284,8 +345,10 @@ sed -i.bak "s|IMAGE_API|${API_IMAGE}|g" "${RENDER_DIR}/20-api.yaml"
 sed -i.bak "s|IMAGE_WEB|${WEB_IMAGE}|g" "${RENDER_DIR}/30-web.yaml"
 if [ -n "${DOMAIN}" ]; then
   sed -i.bak "s|DOMAIN_PLACEHOLDER|${DOMAIN}|g" "${RENDER_DIR}/50-ingress.yaml"
-  if [ -n "${CERT_MANAGER_ISSUER}" ]; then
-    sed -i.bak "s|  annotations:|  annotations:\n    cert-manager.io/cluster-issuer: ${CERT_MANAGER_ISSUER}|" "${RENDER_DIR}/50-ingress.yaml"
+  if [ "${TLS_MODE}" = "issuer" ] || [ "${TLS_MODE}" = "letsencrypt" ]; then
+    sed -i.bak "s|    # TLS_ISSUER_ANNOTATION|    cert-manager.io/cluster-issuer: ${CERT_MANAGER_ISSUER}|" "${RENDER_DIR}/50-ingress.yaml"
+  else
+    sed -i.bak "/# TLS_ISSUER_ANNOTATION/d" "${RENDER_DIR}/50-ingress.yaml"
   fi
 fi
 rm -f "${RENDER_DIR}"/*.bak
@@ -303,13 +366,57 @@ kubectl -n "${NAMESPACE}" rollout status deployment/asp-web --timeout=240s
 # 6. Ingress
 # ---------------------------------------------------------------------------
 if [ "${WITH_INGRESS}" = true ] && [ -n "${DOMAIN}" ]; then
-  log "Déploiement de l'Ingress pour ${DOMAIN}"
+  case "${TLS_MODE}" in
+    files)
+      log "Secret TLS ${TLS_SECRET} depuis les fichiers fournis"
+      kubectl -n "${NAMESPACE}" create secret tls "${TLS_SECRET}" \
+        --cert="${TLS_CERT_FILE}" --key="${TLS_KEY_FILE}" \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+      ;;
+    letsencrypt)
+      ACME_SERVER="https://acme-v02.api.letsencrypt.org/directory"
+      [ "${LETSENCRYPT_STAGING}" = true ] && ACME_SERVER="https://acme-staging-v02.api.letsencrypt.org/directory"
+      log "ClusterIssuer ${CERT_MANAGER_ISSUER} (Let's Encrypt, ${LETSENCRYPT_EMAIL})"
+      cat <<YAML | kubectl apply -f - >/dev/null
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: ${CERT_MANAGER_ISSUER}
+spec:
+  acme:
+    email: ${LETSENCRYPT_EMAIL}
+    server: ${ACME_SERVER}
+    privateKeySecretRef:
+      name: ${CERT_MANAGER_ISSUER}-account
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: nginx
+YAML
+      ;;
+  esac
+
+  log "Déploiement de l'Ingress pour ${DOMAIN} (HTTPS, redirection HTTP -> HTTPS)"
   kubectl apply -f "${RENDER_DIR}/50-ingress.yaml"
-  if [ -z "${CERT_MANAGER_ISSUER}" ]; then
-    warn "Aucun CERT_MANAGER_ISSUER fourni : crée le secret TLS asp-portal-tls ou installe cert-manager"
+
+  if [ "${TLS_MODE}" = "issuer" ] || [ "${TLS_MODE}" = "letsencrypt" ]; then
+    log "Attente du certificat ${TLS_SECRET} (cert-manager, jusqu'à 5 min)"
+    if kubectl -n "${NAMESPACE}" wait --for=condition=Ready "certificate/${TLS_SECRET}" --timeout=300s >/dev/null 2>&1; then
+      ok "Certificat émis"
+    else
+      warn "Certificat pas encore émis : kubectl -n ${NAMESPACE} describe certificate ${TLS_SECRET} (DNS de ${DOMAIN} vers l'Ingress ?)"
+    fi
+  fi
+
+  if command -v curl >/dev/null 2>&1; then
+    if curl -fsS --max-time 10 "https://${DOMAIN}/api/system/health" >/dev/null 2>&1; then
+      ok "HTTPS opérationnel : https://${DOMAIN}"
+    else
+      warn "https://${DOMAIN} ne répond pas encore avec un certificat valide (DNS, propagation ou émission en cours)"
+    fi
   fi
 else
-  warn "Ingress non déployé (--no-ingress ou DOMAIN vide)"
+  warn "Ingress non déployé (--no-ingress ou DOMAIN vide) : accès local en HTTP via port-forward uniquement"
 fi
 
 # ---------------------------------------------------------------------------
@@ -317,8 +424,8 @@ fi
 # ---------------------------------------------------------------------------
 log "Contrôle de santé de l'API"
 kubectl -n "${NAMESPACE}" run "health-$(date +%s)" --rm -i --restart=Never \
-  --image=busybox:1.36 --quiet -- sh -c 'wget -qO- http://asp-api/api/services' >/dev/null 2>&1 \
-  && ok "L'API répond sur /api/services" \
+  --image=busybox:1.36 --quiet -- sh -c 'wget -qO- http://asp-api/api/system/health' >/dev/null 2>&1 \
+  && ok "L'API répond sur /api/system/health" \
   || warn "Le test interne a échoué : vérifie les logs avec kubectl -n ${NAMESPACE} logs deploy/asp-api"
 
 printf "\n${C_OK}Déploiement terminé${C_RESET}\n"

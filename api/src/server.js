@@ -35,7 +35,8 @@ const allowed = String(process.env.ALLOWED_ORIGINS || '')
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
-app.use(helmet());
+// HSTS en production seulement : en local, il bloquerait ensuite http://localhost.
+app.use(helmet({ strictTransportSecurity: isProduction ? { maxAge: 31536000 } : false }));
 if (allowed.includes('*')) {
   app.use(cors({ origin: true, credentials: false, methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'] }));
 } else if (allowed.length) {

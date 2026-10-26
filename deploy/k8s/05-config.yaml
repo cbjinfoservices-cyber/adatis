@@ -9,6 +9,9 @@ data:
   # Origines tierces autorisées à appeler l'API (séparées par des virgules).
   # Vide : le portail et l'API partagent la même origine via l'Ingress.
   ALLOWED_ORIGINS: ""
+  # "true" : cookie de session toujours Secure (positionné par deploy.sh
+  # derrière l'Ingress HTTPS). Vide : déduit de X-Forwarded-Proto.
+  COOKIE_SECURE: ""
   # URL de l'API consommée par le SPA (injectée au build, cf. deploy.sh).
   API_URL: "/api"
   # Destinataire des alertes de disponibilité (valeur par défaut, modifiable

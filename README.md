@@ -22,7 +22,12 @@ npm ci && npm ci --prefix api
 npm run dev:local                 # portail ouvert, sans authentification
 npm run dev:local -- --mock-sso   # SSO via un faux Ascender (admin)
 npm run dev:local -- --reset      # repart d'une base vide
+npm run dev:local -- --https      # https://localhost:3000 (cookie Secure)
 ```
+
+Avec `--https`, un certificat `localhost` est créé une fois dans `.certs/` :
+avec [mkcert](https://github.com/FiloSottile/mkcert) s'il est installé (reconnu
+par le navigateur), sinon auto-signé (avertissement à accepter une fois).
 
 Le portail est sur <http://localhost:3000>. La base (PGlite) est conservée
 dans `.pgdata/`. Avec `--mock-sso`, `DEV_USER=alice` (demandeur) ou
@@ -66,6 +71,9 @@ Les tests de l'API (`api/test/`) tournent sur un vrai PostgreSQL en mémoire
 - **Jetons Ascender et champs mot de passe** : chiffrés en base (AES-256-GCM,
   `TOKEN_ENCRYPTION_KEY`) ; les mots de passe ne sont déchiffrés que pour les
   `extra_vars` Ascender.
+- **HTTPS** : obligatoire en déploiement (`deploy.sh` refuse sans certificat ;
+  Let's Encrypt, ClusterIssuer ou certificat fourni), redirection HTTP → HTTPS,
+  HSTS, cookie `Secure`, Ascender en `https://` (autorité interne possible).
 - **Front** : polices et icônes servies par le portail, CSP limitée à `'self'`
   (aucun appel à un service tiers depuis le navigateur).
 - **Tenant** : déduit de l'organisation Ascender reliée au tenant (Tenants & branding).

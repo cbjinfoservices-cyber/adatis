@@ -8,6 +8,11 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "8m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    # HTTPS obligatoire : toute requête HTTP est redirigée (308) vers HTTPS.
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Remplacé par deploy.sh (annotation cert-manager) ou retiré.
+    # TLS_ISSUER_ANNOTATION
 spec:
   ingressClassName: nginx
   tls:

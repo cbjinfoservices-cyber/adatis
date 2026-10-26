@@ -55,6 +55,13 @@ spec:
                 configMapKeyRef:
                   name: asp-config
                   key: ALLOWED_ORIGINS
+            # "true" derrière l'Ingress HTTPS : cookie de session toujours Secure.
+            - name: COOKIE_SECURE
+              valueFrom:
+                configMapKeyRef:
+                  name: asp-config
+                  key: COOKIE_SECURE
+                  optional: true
             - name: PG_POOL_MAX
               value: "10"
             - name: ALERT_EMAIL_TO
@@ -139,6 +146,14 @@ spec:
                   name: asp-auth
                   key: TOKEN_ENCRYPTION_KEY
                   optional: true
+            # Autorité interne qui signe le certificat d'Ascender (ConfigMap
+            # optionnelle asp-ascender-ca, créée par deploy.sh avec ASCENDER_CA_FILE).
+            - name: NODE_EXTRA_CA_CERTS
+              value: /etc/asp/ascender-ca/ca.crt
+          volumeMounts:
+            - name: ascender-ca
+              mountPath: /etc/asp/ascender-ca
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /health
@@ -160,6 +175,11 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+      volumes:
+        - name: ascender-ca
+          configMap:
+            name: asp-ascender-ca
+            optional: true
 ---
 apiVersion: v1
 kind: Service
