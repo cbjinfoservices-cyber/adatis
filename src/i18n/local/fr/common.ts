@@ -1060,6 +1060,8 @@ const fr = {
   brand_awx_org_hint: "Les membres de cette organisation Ascender reçoivent ce tenant à leur connexion : leurs demandes y sont rattachées et les approbateurs du tenant les voient.",
   brand_awx_org_taken: "Cette organisation Ascender est déjà reliée à un autre tenant.",
   awx_job_awaiting_requester: "Demande approuvée, mais votre jeton Ascender n'était plus utilisable : lancez le job vous-même.",
+  admin_not_wired: "Exécution non branchée",
+  admin_not_wired_hint: "Le test vérifie réellement que l'URL répond, mais le portail ne lance encore aucun job sur ce moteur : seul Ascender exécute les commandes.",
 };
 
 export default fr;

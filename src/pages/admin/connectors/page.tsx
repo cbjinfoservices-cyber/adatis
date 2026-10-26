@@ -102,9 +102,15 @@ export default function ConnectorsPage() {
     jobs: items.reduce((acc, c) => acc + c.jobs24h, 0),
   }), [items]);
 
-  /** Connecteur Ascender : l'API pingue réellement /api/v2/ping/. */
-  const testManaged = async (connector: Connector): Promise<ConnectorTestEntry | null> => {
+  /**
+   * Test réel exécuté par l'API (ping Ascender, joignabilité de l'URL pour les
+   * autres). Avec `endpoint`, la nouvelle URL est d'abord enregistrée.
+   */
+  const runServerTest = async (connector: Connector, endpoint?: string): Promise<ConnectorTestEntry | null> => {
     try {
+      if (endpoint && !connector.managed && endpoint !== connector.endpoint) {
+        await api.patch(`/connectors/${connector.id}`, { endpoint });
+      }
       const updated = await api.post<Connector>(`/connectors/${connector.id}/test`);
       await reloadStore();
       const entry = updated.tests[0] || null;
@@ -120,24 +126,7 @@ export default function ConnectorsPage() {
   const testConnector = async (connector: Connector) => {
     setTestingId(connector.id);
     try {
-      if (connector.managed) {
-        await testManaged(connector);
-        return;
-      }
-      if (connector.configured === false) {
-        await api.post(`/connectors/${connector.id}/test`, {
-          ok: false, latency: 0, error: '401 Unauthorized - missing access token',
-        });
-        await reloadStore();
-        notify(t('admin_test_blocked', { name: connector.name }));
-        return;
-      }
-      const latency = 42 + ((connector.latencyMs * 7) % 61);
-      await api.post(`/connectors/${connector.id}/test`, { ok: true, latency });
-      await reloadStore();
-      notify(t('admin_test_ok', { name: connector.name, ms: latency }));
-    } catch {
-      notifyFailure();
+      await runServerTest(connector);
     } finally {
       setTestingId(null);
     }
@@ -257,16 +246,6 @@ export default function ConnectorsPage() {
 
   const updateNotes = (id: string, notes: string) => {
     void patchConnector(id, { notes });
-  };
-
-  const handleEndpointTested = async (id: string, endpoint: string, result: ConnectorTestEntry) => {
-    try {
-      await api.patch(`/connectors/${id}`, { endpoint });
-      await api.post(`/connectors/${id}/test`, { ok: result.ok, latency: result.latency, error: result.error });
-      await reloadStore();
-    } catch {
-      notifyFailure();
-    }
   };
 
   const addAdapter = async (adapter: AdapterOption) => {
@@ -686,8 +665,7 @@ export default function ConnectorsPage() {
                 onTestAllRetest={testAllRetest}
                 onToggleMap={toggleMap}
                 onUpdateEndpoint={(endpoint) => updateEndpoint(detailConnector.id, endpoint)}
-                onEndpointTested={(endpoint, result) => handleEndpointTested(detailConnector.id, endpoint, result)}
-                onTestManaged={() => testManaged(detailConnector)}
+                onTest={(endpoint) => runServerTest(detailConnector, endpoint)}
                 onRename={(name) => renameConnector(detailConnector.id, name)}
                 onNotes={(notes) => updateNotes(detailConnector.id, notes)}
                 onDuplicate={() => duplicateConnector(detailConnector)}

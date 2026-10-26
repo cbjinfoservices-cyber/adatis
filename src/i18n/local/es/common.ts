@@ -1060,6 +1060,8 @@ const es = {
   brand_awx_org_hint: "Los miembros de esta organización de Ascender reciben este tenant al iniciar sesión: sus solicitudes se vinculan a él y los aprobadores del tenant las ven.",
   brand_awx_org_taken: "Esta organización de Ascender ya está vinculada a otro tenant.",
   awx_job_awaiting_requester: "Solicitud aprobada, pero tu token de Ascender ya no era utilizable: lanza el job tú mismo.",
+  admin_not_wired: "Ejecución no conectada",
+  admin_not_wired_hint: "La prueba comprueba realmente que la URL responde, pero el portal aún no lanza ningún job en este motor: solo Ascender ejecuta las solicitudes.",
 };
 
 export default es;

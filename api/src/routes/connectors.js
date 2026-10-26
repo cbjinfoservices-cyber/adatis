@@ -2,6 +2,7 @@ const express = require('express');
 const { q, withTransaction } = require('../db');
 const m = require('../mappers');
 const ascender = require('../ascenderConnector');
+const { probeEndpoint } = require('../endpointProbe');
 
 const router = express.Router();
 
@@ -69,11 +70,35 @@ router.get('/batch-tests', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/**
+ * Test réel d'un connecteur, enregistré dans connector_tests : ping Ascender
+ * pour le connecteur géré, joignabilité de l'URL pour les autres.
+ */
+async function testConnector(row) {
+  if (ascender.isManaged(row)) return ascender.runTest(row.id);
+
+  const result = await probeEndpoint(row.endpoint);
+  await withTransaction(async (client) => {
+    await client.query(
+      'INSERT INTO connector_tests (connector_id, at, ok, latency, error) VALUES ($1, now(), $2, $3, $4)',
+      [row.id, result.ok, result.latency, result.error],
+    );
+    await client.query(
+      `UPDATE connectors
+          SET latency_ms = $1, health = $2,
+              retest_required_at = CASE WHEN $3 THEN NULL ELSE retest_required_at END
+        WHERE id = $4`,
+      [result.latency, result.health, result.ok, row.id],
+    );
+  });
+  return result;
+}
+
 router.post('/connectors/batch-test', async (_req, res, next) => {
   try {
     const started = Date.now();
     const targets = await q(
-      `SELECT id, name, configured, managed, latency_ms, health FROM connectors
+      `SELECT * FROM connectors
        WHERE retest_required_at IS NOT NULL AND (configured = true OR managed = true)
        ORDER BY name`,
     );
@@ -82,36 +107,10 @@ router.post('/connectors/batch-test', async (_req, res, next) => {
       return res.json({ skipped: true, total: 0, ok: 0, failed: 0, avgLatencyMs: 0, durationMs: 0 });
     }
 
-    const results = [];
-    for (const target of targets.rows) {
-      if (ascender.isManaged(target)) {
-        // Test réel, enregistré par runTest lui-même.
-        // eslint-disable-next-line no-await-in-loop
-        const real = await ascender.runTest(target.id);
-        results.push({ id: target.id, ok: real.ok, latency: real.latency, recorded: true });
-        continue;
-      }
-      const latency = Math.round(60 + Math.random() * 320);
-      const ok = target.health !== 'down';
-      results.push({ id: target.id, ok, latency });
-    }
-
-    await withTransaction(async (client) => {
-      for (const result of results.filter((r) => !r.recorded)) {
-        await client.query(
-          'INSERT INTO connector_tests (connector_id, at, ok, latency, error) VALUES ($1, now(), $2, $3, $4)',
-          [result.id, result.ok, result.ok ? result.latency : 0, result.ok ? null : 'Test groupé : hôte injoignable'],
-        );
-        await client.query(
-          `UPDATE connectors
-           SET latency_ms = $1,
-               health = CASE WHEN $2 THEN 'healthy' ELSE 'degraded' END,
-               retest_required_at = CASE WHEN $2 THEN NULL ELSE retest_required_at END
-           WHERE id = $3`,
-          [result.ok ? result.latency : 0, result.ok, result.id],
-        );
-      }
-    });
+    const results = await Promise.all(targets.rows.map(async (target) => {
+      const result = await testConnector(target);
+      return { id: target.id, ok: result.ok, latency: result.latency };
+    }));
 
     const ok = results.filter((r) => r.ok);
     const summary = {
@@ -279,30 +278,11 @@ router.delete('/connectors/:id', async (req, res, next) => {
 
 router.post('/connectors/:id/test', async (req, res, next) => {
   try {
-    const { ok = true, latency = 0, error = null } = req.body || {};
     const current = await q('SELECT * FROM connectors WHERE id = $1', [req.params.id]);
     if (!current.rows.length) return res.status(404).json({ error: 'connector_not_found' });
 
-    // Ascender : ping réel, le résultat envoyé par le navigateur est ignoré.
-    if (ascender.isManaged(current.rows[0])) {
-      await ascender.runTest(req.params.id);
-      const { rows } = await q('SELECT * FROM connectors WHERE id = $1', [req.params.id]);
-      return res.json((await hydrate(rows))[0]);
-    }
-
-    await withTransaction(async (client) => {
-      await client.query(
-        'INSERT INTO connector_tests (connector_id, at, ok, latency, error) VALUES ($1, now(), $2, $3, $4)',
-        [req.params.id, ok, ok ? latency : 0, error],
-      );
-      await client.query(
-        `UPDATE connectors
-         SET latency_ms = $1, health = $2,
-             retest_required_at = CASE WHEN $3 THEN NULL ELSE retest_required_at END
-         WHERE id = $4`,
-        [ok ? latency : 0, ok ? 'healthy' : 'degraded', ok, req.params.id],
-      );
-    });
+    // Test réel côté serveur : aucun résultat n'est accepté du navigateur.
+    await testConnector(current.rows[0]);
 
     const { rows } = await q('SELECT * FROM connectors WHERE id = $1', [req.params.id]);
     return res.json((await hydrate(rows))[0]);

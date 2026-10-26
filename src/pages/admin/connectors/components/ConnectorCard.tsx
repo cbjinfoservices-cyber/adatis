@@ -46,6 +46,14 @@ export default function ConnectorCard({
               <div className="min-w-0">
                 <h3 className="font-heading font-semibold text-foreground-950 truncate">{connector.name}</h3>
                 <p className="font-label text-[10px] uppercase tracking-widest text-foreground-500">{connector.kind}</p>
+                {!connector.managed && (
+                  <span
+                    title={t('admin_not_wired_hint')}
+                    className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-background-200 font-label text-[9px] text-foreground-700 whitespace-nowrap"
+                  >
+                    <i className="ri-plug-2-line" />{t('admin_not_wired')}
+                  </span>
+                )}
               </div>
               <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-label text-[10px] whitespace-nowrap shrink-0 ${health.badge}`}>
                 <i className={health.icon} />

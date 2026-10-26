@@ -10,7 +10,7 @@ import type { BatchTestEntry } from '@/utils/store';
 
 export default function ConnectorDetail({
   connector, retestCount, testingAll, onTestAllRetest, batchHistory,
-  onToggleMap, onUpdateEndpoint, onEndpointTested, onTestManaged, onRename, onNotes, onDuplicate, onNotify, onDelete,
+  onToggleMap, onUpdateEndpoint, onTest, onRename, onNotes, onDuplicate, onNotify, onDelete,
 }: {
   connector: Connector;
   retestCount: number;
@@ -19,9 +19,8 @@ export default function ConnectorDetail({
   onTestAllRetest: () => void;
   onToggleMap: (itemId: string) => void;
   onUpdateEndpoint: (endpoint: string) => void;
-  onEndpointTested: (endpoint: string, result: ConnectorTestEntry) => void;
-  /** Test réel côté API (connecteur Ascender) : renvoie l'entrée enregistrée. */
-  onTestManaged: () => Promise<ConnectorTestEntry | null>;
+  /** Test réel côté API (avec une nouvelle URL éventuelle) : renvoie l'entrée enregistrée. */
+  onTest: (endpoint?: string) => Promise<ConnectorTestEntry | null>;
   onRename: (name: string) => void;
   onNotes: (notes: string) => void;
   onDuplicate: () => void;
@@ -131,16 +130,8 @@ export default function ConnectorDetail({
 
   const testEndpoint = async () => {
     if (readOnly) return;
-    if (managed) {
-      setTestingEndpoint(true);
-      setTestResult(null);
-      const entry = await onTestManaged();
-      setTestingEndpoint(false);
-      if (entry) setTestResult({ ok: entry.ok, latency: entry.latency, error: entry.error });
-      return;
-    }
     const next = endpoint.trim();
-    if (!endpointIsValid(next)) {
+    if (!managed && !endpointIsValid(next)) {
       setEndpointError(t('admin_endpoint_invalid'));
       setTestResult(null);
       return;
@@ -148,20 +139,9 @@ export default function ConnectorDetail({
     setEndpointError(null);
     setTestingEndpoint(true);
     setTestResult(null);
-    window.setTimeout(() => {
-      setTestingEndpoint(false);
-      const at = new Date().toISOString();
-      if (connector.configured === false) {
-        const error = '401 Unauthorized - missing access token';
-        setTestResult({ ok: false, latency: 0, error });
-        onEndpointTested(connector.endpoint, { at, ok: false, latency: 0, error });
-        return;
-      }
-      const latency = 38 + ((next.length * 5) % 74);
-      setTestResult({ ok: true, latency, error: null });
-      setEndpoint(next);
-      onEndpointTested(next, { at, ok: true, latency, error: null });
-    }, 1050);
+    const entry = await onTest(managed ? undefined : next);
+    setTestingEndpoint(false);
+    if (entry) setTestResult({ ok: entry.ok, latency: entry.latency, error: entry.error });
   };
 
   const formatDate = (value: string) =>
@@ -256,6 +236,11 @@ export default function ConnectorDetail({
           <p className="mt-0.5 font-label text-[11px] text-foreground-500">
             {t('admin_config')} · {connector.version} · {connector.scope === 'tenant' ? t('admin_scope_tenant') : t('admin_scope_platform')}
           </p>
+          {!managed && (
+            <p className="mt-1 inline-flex items-start gap-1 text-[11px] text-foreground-600">
+              <i className="ri-plug-2-line mt-px" />{t('admin_not_wired_hint')}
+            </p>
+          )}
         </div>
         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md font-label text-[11px] whitespace-nowrap ${health.badge}`}>
           <i className={health.icon} />
