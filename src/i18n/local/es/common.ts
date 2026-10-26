@@ -1055,6 +1055,10 @@ const es = {
   notif_history_kpi_unread: "Sin leer",
   notif_history_kpi_exec: "Ejecuciones",
   notif_history_kpi_appr: "Aprobaciones",
+  brand_awx_org: "Organización de Ascender",
+  brand_awx_org_placeholder: "p. ej. Infra",
+  brand_awx_org_hint: "Los miembros de esta organización de Ascender reciben este tenant al iniciar sesión: sus solicitudes se vinculan a él y los aprobadores del tenant las ven.",
+  brand_awx_org_taken: "Esta organización de Ascender ya está vinculada a otro tenant.",
 };
 
 export default es;

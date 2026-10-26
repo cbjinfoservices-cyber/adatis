@@ -1055,6 +1055,10 @@ const de = {
   notif_history_kpi_unread: "Ungelesen",
   notif_history_kpi_exec: "Ausführungen",
   notif_history_kpi_appr: "Genehmigungen",
+  brand_awx_org: "Ascender-Organisation",
+  brand_awx_org_placeholder: "z. B. Infra",
+  brand_awx_org_hint: "Mitglieder dieser Ascender-Organisation erhalten bei der Anmeldung diesen Mandanten: Ihre Anfragen gehören dazu und die Genehmigenden des Mandanten sehen sie.",
+  brand_awx_org_taken: "Diese Ascender-Organisation ist bereits mit einem anderen Mandanten verknüpft.",
 };
 
 export default de;

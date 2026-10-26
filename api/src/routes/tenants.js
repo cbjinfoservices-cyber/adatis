@@ -38,6 +38,7 @@ const FIELD_MAP = {
   emailBody: 'email_body',
   usersCount: 'users_count',
   servicesCount: 'services_count',
+  awxOrganization: 'awx_organization',
 };
 
 router.patch('/tenants/:id', async (req, res, next) => {
@@ -54,6 +55,7 @@ router.patch('/tenants/:id', async (req, res, next) => {
       let value = body[key];
       if (key === 'domain') value = String(value).trim().toLowerCase();
       if (key === 'portalUrl') value = String(value).trim();
+      if (key === 'awxOrganization') value = String(value || '').trim().slice(0, 120);
       if (key === 'usersCount' || key === 'servicesCount') value = Number(value) || 0;
       params.push(value);
       sets.push(`${column} = $${params.length}`);
@@ -75,7 +77,11 @@ router.patch('/tenants/:id', async (req, res, next) => {
     );
     if (!rows.length) return res.status(404).json({ error: 'tenant_not_found' });
     return res.json(m.tenant(rows[0]));
-  } catch (err) { return next(err); }
+  } catch (err) {
+    // Une organisation Ascender ne peut être reliée qu'à un seul tenant.
+    if (err.code === '23505') return res.status(409).json({ error: 'organization_taken' });
+    return next(err);
+  }
 });
 
 router.post('/tenants/:id/verify-domain', async (req, res, next) => {

@@ -19,6 +19,8 @@ export interface TenantBranding {
   emailBody: string;
   users: number;
   services: number;
+  /** Organisation Ascender dont les membres reçoivent ce tenant à la connexion. */
+  awxOrganization: string;
 }
 
 export interface TenantPatch {
@@ -30,6 +32,7 @@ export interface TenantPatch {
   portalUrl?: string;
   emailSubject?: string;
   emailBody?: string;
+  awxOrganization?: string;
 }
 
 interface ColorSeed { h: number; c: number }
@@ -174,6 +177,7 @@ export const FALLBACK_BRANDING: TenantBranding = {
   emailBody: '',
   users: 0,
   services: 0,
+  awxOrganization: '',
 };
 
 export const resolveActiveBranding = (
@@ -195,6 +199,7 @@ export const brandingPayload = (branding: TenantBranding): TenantPatch => ({
   portalUrl: branding.portalUrl,
   emailSubject: branding.emailSubject,
   emailBody: branding.emailBody,
+  awxOrganization: branding.awxOrganization,
 });
 
 export const saveTenantBranding = (id: string, branding: TenantBranding) =>

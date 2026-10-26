@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { ApiError } from '@/utils/api';
 import AppShell from '@/components/feature/AppShell';
 import AdminTabs from '@/pages/admin/components/AdminTabs';
 import { ErrorBlock, LoadingBlock } from '@/components/base/DataState';
@@ -80,8 +81,9 @@ export default function BrandingPage() {
       applyPalette(updated.palette);
       notifyBrandingUpdated();
       setToast(t('brand_saved', { tenant: updated.name }));
-    } catch {
-      setToast(t('brand_save_error'));
+    } catch (err) {
+      const code = err instanceof ApiError ? (err.detail as { error?: string } | null)?.error : '';
+      setToast(code === 'organization_taken' ? t('brand_awx_org_taken') : t('brand_save_error'));
     } finally {
       setBusy(false);
     }

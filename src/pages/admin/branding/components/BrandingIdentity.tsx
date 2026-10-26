@@ -65,6 +65,19 @@ export default function BrandingIdentity({
             className="mt-1.5 w-full box-border px-3 py-2.5 rounded-lg border border-background-300 bg-background-100 text-sm text-foreground-950 focus:outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/30 disabled:opacity-60 disabled:cursor-not-allowed"
           />
         </label>
+        <label className="block min-w-0 md:col-span-2">
+          <span className="font-label text-[10px] uppercase tracking-widest text-foreground-500">{t('brand_awx_org')}</span>
+          <input
+            type="text"
+            value={branding.awxOrganization}
+            onChange={(e) => onChange({ awxOrganization: e.target.value })}
+            maxLength={120}
+            disabled={readOnly}
+            placeholder={t('brand_awx_org_placeholder')}
+            className="mt-1.5 w-full box-border px-3 py-2.5 rounded-lg border border-background-300 bg-background-100 text-sm text-foreground-950 focus:outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-400/30 disabled:opacity-60 disabled:cursor-not-allowed"
+          />
+          <span className="mt-1 block text-[11px] text-foreground-600">{t('brand_awx_org_hint')}</span>
+        </label>
       </div>
 
       <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-4">

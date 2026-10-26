@@ -186,6 +186,7 @@ function tenant(row) {
     emailBody: row.email_body,
     users: num(row.users_count),
     services: num(row.services_count),
+    awxOrganization: row.awx_organization || '',
   };
 }
 

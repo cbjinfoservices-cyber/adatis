@@ -1055,6 +1055,10 @@ const fr = {
   err_option: "Valeur non proposée",
   err_type: "Type de valeur invalide",
   err_date: "Date invalide",
+  brand_awx_org: "Organisation Ascender",
+  brand_awx_org_placeholder: "ex. Infra",
+  brand_awx_org_hint: "Les membres de cette organisation Ascender reçoivent ce tenant à leur connexion : leurs demandes y sont rattachées et les approbateurs du tenant les voient.",
+  brand_awx_org_taken: "Cette organisation Ascender est déjà reliée à un autre tenant.",
 };
 
 export default fr;

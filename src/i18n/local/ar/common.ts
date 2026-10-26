@@ -1055,6 +1055,10 @@ const ar = {
   notif_history_kpi_unread: "غير مقروءة",
   notif_history_kpi_exec: "عمليات التنفيذ",
   notif_history_kpi_appr: "الموافقات",
+  brand_awx_org: "مؤسسة Ascender",
+  brand_awx_org_placeholder: "مثال: Infra",
+  brand_awx_org_hint: "يحصل أعضاء مؤسسة Ascender هذه على هذا المستأجر عند تسجيل الدخول: تُربط طلباتهم به ويراها الموافقون في المستأجر.",
+  brand_awx_org_taken: "مؤسسة Ascender هذه مرتبطة بالفعل بمستأجر آخر.",
 };
 
 export default ar;

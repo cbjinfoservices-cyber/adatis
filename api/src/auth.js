@@ -340,6 +340,25 @@ const requireRole = (...roles) => (req, res, next) => {
   return next();
 };
 
+/**
+ * Tenant de l'utilisateur : celui relié (tenants.awx_organization) à l'une de
+ * ses organisations Ascender. Aucun tenant relié : null.
+ */
+const tenantForOrganizations = async (organizations) => {
+  const names = (organizations || []).map((org) => String(org.name || '').trim().toLowerCase()).filter(Boolean);
+  if (!names.length) return null;
+  try {
+    const { rows } = await q(
+      `SELECT id FROM tenants WHERE awx_organization <> '' AND lower(awx_organization) = ANY($1)
+        ORDER BY name LIMIT 1`,
+      [names],
+    );
+    return rows[0]?.id || null;
+  } catch {
+    return null;
+  }
+};
+
 /** Utilisateur portail aligné sur l'identité AWX (créé au premier login). */
 const upsertUser = async ({ identity, role }) => {
   const email = String(identity.email || '').trim().toLowerCase();
@@ -358,6 +377,7 @@ const upsertUser = async ({ identity, role }) => {
 
   const organizations = (identity.organizations || []).map((org) => org.name);
   const teams = (identity.teams || []).map((team) => team.name);
+  const tenantId = await tenantForOrganizations(identity.organizations);
 
   if (existing.rows.length) {
     const row = existing.rows[0];
@@ -366,12 +386,12 @@ const upsertUser = async ({ identity, role }) => {
           SET name = $2, initials = $3, email = COALESCE(NULLIF($4, ''), email),
               role = $5, awx_user_id = COALESCE($6, awx_user_id),
               awx_username = $7, auth_provider = 'awx', last_login_at = now(),
-              awx_organizations = $8, awx_teams = $9
+              awx_organizations = $8, awx_teams = $9, tenant_id = $10
         WHERE id = $1
         RETURNING *`,
       [
         row.id, displayName, initialsOf(displayName), email, role,
-        identity.awxUserId, identity.username, organizations, teams,
+        identity.awxUserId, identity.username, organizations, teams, tenantId,
       ],
     );
     return rows[0];
@@ -381,15 +401,16 @@ const upsertUser = async ({ identity, role }) => {
   const { rows } = await q(
     `INSERT INTO users
        (id, name, initials, email, role, awx_user_id, awx_username,
-        auth_provider, last_login_at, awx_organizations, awx_teams)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'awx', now(), $8, $9)
+        auth_provider, last_login_at, awx_organizations, awx_teams, tenant_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'awx', now(), $8, $9, $10)
      ON CONFLICT (id) DO UPDATE
-        SET name = EXCLUDED.name, role = EXCLUDED.role, last_login_at = now()
+        SET name = EXCLUDED.name, role = EXCLUDED.role, last_login_at = now(),
+            tenant_id = EXCLUDED.tenant_id
      RETURNING *`,
     [
       id, displayName, initialsOf(displayName),
       email || `${identity.username || id}@awx.local`,
-      role, identity.awxUserId, identity.username, organizations, teams,
+      role, identity.awxUserId, identity.username, organizations, teams, tenantId,
     ],
   );
   return rows[0];
