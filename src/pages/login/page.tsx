@@ -62,11 +62,22 @@ export default function LoginPage() {
       {/* Panneau de gauche : promesse produit */}
       <aside className="relative hidden lg:flex flex-col justify-between p-10 xl:p-14 bg-foreground-950 text-background-50 overflow-hidden">
         <div className="absolute inset-0">
-          <img
-            src="https://readdy.ai/api/search-image?query=Abstract%20dark%20teal%20automation%20network%20visualisation%2C%20glowing%20nodes%20and%20thin%20connecting%20lines%20on%20a%20deep%20charcoal%20background%2C%20editorial%20technology%20photography%2C%20subtle%20grain%2C%20minimal%20and%20elegant%2C%20soft%20vignette&width=1200&height=1600&seq=awx-sso-login-panel&orientation=portrait"
-            alt=""
-            className="w-full h-full object-cover opacity-35"
-          />
+          {/* Motif « réseau d'automatisation » dessiné en SVG : aucune image distante. */}
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 600 800"
+            preserveAspectRatio="xMidYMid slice"
+            className="w-full h-full text-primary-400 opacity-35"
+          >
+            <g stroke="currentColor" strokeWidth="1" opacity="0.6">
+              <path d="M80 120 L240 210 L420 140 L540 260 M240 210 L200 380 L360 430 L420 140 M360 430 L520 520 L460 690 M200 380 L90 520 L230 650 L460 690 M90 520 L60 300 L80 120 M230 650 L360 430" fill="none" />
+            </g>
+            <g fill="currentColor">
+              {[[80, 120], [240, 210], [420, 140], [540, 260], [200, 380], [360, 430], [520, 520], [460, 690], [90, 520], [230, 650], [60, 300]].map(([cx, cy]) => (
+                <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="5" />
+              ))}
+            </g>
+          </svg>
           <div className="absolute inset-0 bg-gradient-to-b from-foreground-950/80 via-foreground-950/60 to-foreground-950" />
         </div>
 

@@ -7,8 +7,16 @@ i18n
   .use(LanguageDetector)
   .use(initReactI18next)
   .init({
-    lng: 'fr',
-    fallbackLng: ['en', 'fr'],
+    // Pas de « lng » fixe : il écraserait la langue choisie à chaque rechargement.
+    // Langue retenue : celle mémorisée par le menu, sinon le français.
+    supportedLngs: ['fr', 'en', 'es', 'de', 'ar'],
+    load: 'languageOnly',
+    fallbackLng: 'fr',
+    detection: {
+      order: ['localStorage'],
+      lookupLocalStorage: 'i18nextLng',
+      caches: ['localStorage'],
+    },
     debug: false,
     resources: messages,
     interpolation: {

@@ -34,7 +34,14 @@ change l'utilisateur connecté.
 ```sh
 npm run type-check && npm run lint && npm run build   # front
 npm run test:api                                      # API
+npm run build && npm run test:e2e                     # navigateur (Chromium)
 ```
+
+`test:e2e` (Playwright, `npx playwright install chromium` la première fois)
+sert le build de production avec la CSP de `deploy/nginx.conf`, se connecte en
+admin puis en demandeur et parcourt chaque page : il échoue sur toute erreur
+JavaScript, violation CSP, requête en échec ou clé de traduction affichée.
+Captures dans `e2e-output/`.
 
 Les tests de l'API (`api/test/`) tournent sur un vrai PostgreSQL en mémoire
 (PGlite, avec toutes les migrations) et un faux Ascender multi-utilisateurs
@@ -59,6 +66,8 @@ Les tests de l'API (`api/test/`) tournent sur un vrai PostgreSQL en mémoire
 - **Jetons Ascender et champs mot de passe** : chiffrés en base (AES-256-GCM,
   `TOKEN_ENCRYPTION_KEY`) ; les mots de passe ne sont déchiffrés que pour les
   `extra_vars` Ascender.
+- **Front** : polices et icônes servies par le portail, CSP limitée à `'self'`
+  (aucun appel à un service tiers depuis le navigateur).
 - **Tenant** : déduit de l'organisation Ascender reliée au tenant (Tenants & branding).
 
 ## Configuration principale (API)

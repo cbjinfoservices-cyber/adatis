@@ -171,6 +171,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </>
         )}
       </div>
+      {/* Santé des connecteurs : information d'administration. */}
+      {showAdmin && (
       <div className="mx-3 mb-2 px-3 py-2.5 rounded-xl bg-background-100 border border-background-200">
         <div className="flex items-center justify-between gap-2">
           <p className="font-label text-[10px] uppercase tracking-widest text-foreground-500">{t('sidebar_connector_health')}</p>
@@ -240,6 +242,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </div>
         )}
       </div>
+      )}
       <div className="mx-3 mb-2 px-3 py-2.5 rounded-xl bg-background-100 border border-background-200">
         <p className="font-label text-[10px] uppercase tracking-widest text-foreground-500">{t('portal_url_label')}</p>
         <a
