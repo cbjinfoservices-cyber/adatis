@@ -1,20 +1,23 @@
+import { lazy } from "react";
 import type { RouteObject } from "react-router-dom";
 import NotFound from "@/pages/NotFound";
-import Home from "@/pages/home/page";
-import ServicePage from "@/pages/service/page";
-import RequestsPage from "@/pages/requests/page";
-import AwxTrackingPage from "@/pages/awx/page";
-import RequestDetailPage from "@/pages/requests/detail/page";
-import DashboardPage from "@/pages/dashboard/page";
-import ApprovalsPage from "@/pages/approvals/page";
-import NotificationsPage from "@/pages/notifications/page";
-import ConnectorsPage from "@/pages/admin/connectors/page";
-import AdaptersPage from "@/pages/admin/adapters/page";
-import AdminServicesPage from "@/pages/admin/services/page";
-import BrandingPage from "@/pages/admin/branding/page";
-import SystemPage from "@/pages/admin/system/page";
-import AuthAdminPage from "@/pages/admin/auth/page";
-import LoginPage from "@/pages/login/page";
+
+// Une page = un fichier JS chargé à la demande (bundle initial allégé).
+const Home = lazy(() => import("@/pages/home/page"));
+const ServicePage = lazy(() => import("@/pages/service/page"));
+const RequestsPage = lazy(() => import("@/pages/requests/page"));
+const AwxTrackingPage = lazy(() => import("@/pages/awx/page"));
+const RequestDetailPage = lazy(() => import("@/pages/requests/detail/page"));
+const DashboardPage = lazy(() => import("@/pages/dashboard/page"));
+const ApprovalsPage = lazy(() => import("@/pages/approvals/page"));
+const NotificationsPage = lazy(() => import("@/pages/notifications/page"));
+const ConnectorsPage = lazy(() => import("@/pages/admin/connectors/page"));
+const AdaptersPage = lazy(() => import("@/pages/admin/adapters/page"));
+const AdminServicesPage = lazy(() => import("@/pages/admin/services/page"));
+const BrandingPage = lazy(() => import("@/pages/admin/branding/page"));
+const SystemPage = lazy(() => import("@/pages/admin/system/page"));
+const AuthAdminPage = lazy(() => import("@/pages/admin/auth/page"));
+const LoginPage = lazy(() => import("@/pages/login/page"));
 
 const routes: RouteObject[] = [
   {

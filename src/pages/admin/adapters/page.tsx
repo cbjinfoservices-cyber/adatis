@@ -60,7 +60,7 @@ export default function AdaptersPage() {
 
   const totals = useMemo(() => ({
     total: adapters.length,
-    used: adapters.filter((adapter) => countOf(adapter.kind) > 0).length,
+    used: adapters.filter((adapter) => (usage.get(adapter.kind) || 0) > 0).length,
     connectors: connectors.length,
   }), [adapters, connectors, usage]);
 

@@ -48,12 +48,12 @@ export default function SystemAvailability({ history }: { history: SystemHistory
     minute: '2-digit',
   });
 
-  const rangeLabel = useMemo(() => {
-    if (buckets.length === 0) return '';
-    const from = timeLabel(buckets[0].start);
-    const to = timeLabel(new Date(history.buckets[history.buckets.length - 1].end).toISOString());
-    return t('sys_avail_range', { from, to });
-  }, [buckets, i18n.language, t]);
+  const rangeLabel = buckets.length === 0
+    ? ''
+    : t('sys_avail_range', {
+      from: timeLabel(buckets[0].start),
+      to: timeLabel(new Date(buckets[buckets.length - 1].end).toISOString()),
+    });
 
   const { maxLatency, latencySeries } = useMemo(() => {
     const values = buckets

@@ -32,7 +32,7 @@ export default function DomainSettings({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branding.id]);
 
-  const saved = branding.domain === value.trim() && branding.domainStatus !== 'not_configured';
+  const saved = branding.domain === value.trim() && branding.domainStatus !== 'not_set';
   const sub = value.trim().split('.')[0] || '@';
 
   const records = [

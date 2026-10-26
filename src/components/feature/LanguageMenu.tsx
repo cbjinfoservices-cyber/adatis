@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-export const LANGUAGES = [
+const LANGUAGES = [
   { code: 'fr', label: 'Français', short: 'FR' },
   { code: 'en', label: 'English', short: 'EN' },
   { code: 'es', label: 'Español', short: 'ES' },
