@@ -46,7 +46,8 @@
     "type-check": "tsc --noEmit --project tsconfig.app.json",
     "dev:local": "node scripts/dev-local.mjs",
     "test:api": "npm --prefix api test",
-    "test:e2e": "node scripts/e2e-smoke.mjs"
+    "test:e2e": "node scripts/e2e-smoke.mjs",
+    "package": "node scripts/package.mjs"
   },
   "type": "module",
   "version": "0.0.0"

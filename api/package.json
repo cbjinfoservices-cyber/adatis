@@ -7,17 +7,19 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test --test-concurrency=1"
+    "test": "node --test --test-concurrency=1",
+    "rotate-keys": "node scripts/rotate-keys.js"
   },
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
-    "compression": "1.7.5",
+    "compression": "1.8.2",
     "cors": "2.8.5",
-    "express": "4.21.2",
+    "express": "4.22.3",
     "express-rate-limit": "7.5.0",
     "helmet": "8.1.0",
+    "nodemailer": "10.1.7",
     "pg": "8.13.1"
   },
   "devDependencies": {

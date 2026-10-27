@@ -56,6 +56,12 @@ function request(row) {
     approval: row.approval,
     approvalState: row.approval_state,
     businessType: row.business_type,
+    // Moteur (type de connecteur) retenu à la commande.
+    engine: {
+      kind: row.connector_kind || (row.awx_job_id ? 'ascender' : ''),
+      connectorId: row.connector_id || null,
+      connectorName: row.connector_name || '',
+    },
     // Approuvée mais non lancée faute de jeton du demandeur : à lancer par lui.
     awaitingRequester: !row.awx_job_id && row.awx_status === 'awaiting_requester',
     awx: row.awx_job_id ? {

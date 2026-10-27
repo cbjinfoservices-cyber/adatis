@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AuditEntry } from '@/utils/approvals';
 import { localeOf, tx } from '@/utils/catalog';
+import { toCsv } from '@/utils/csv';
 
 type Filter = 'all' | 'approved' | 'rejected';
 
@@ -52,9 +53,7 @@ export default function DecisionAuditLog({ entries }: { entries: AuditEntry[] })
       e.tenant,
       tx(e.comment, lang),
     ]);
-    const csv = [header, ...rows]
-      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-      .join('\n');
+    const csv = toCsv([header, ...rows]);
     const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');

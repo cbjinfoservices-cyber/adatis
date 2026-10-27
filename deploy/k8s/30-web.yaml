@@ -22,6 +22,14 @@ spec:
         app.kubernetes.io/name: asp-web
         app.kubernetes.io/part-of: asp-portal
     spec:
+      automountServiceAccountToken: false
+      # nginx-unprivileged : UID 101, port 8080, aucune capacité requise.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: web
           image: IMAGE_WEB
@@ -29,6 +37,18 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          env:
+            - name: NGINX_ENTRYPOINT_QUIET_LOGS
+              value: "1"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # Seul /tmp est inscriptible (pid et fichiers temporaires de nginx).
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             httpGet:
               path: /healthz
@@ -50,6 +70,10 @@ spec:
             limits:
               cpu: 250m
               memory: 256Mi
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
 ---
 apiVersion: v1
 kind: Service
@@ -67,3 +91,14 @@ spec:
     - name: http
       port: 80
       targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: asp-web
+  namespace: asp-portal
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: asp-web

@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { q } = require('./db');
 const awx = require('./awx');
 const { encrypt, decrypt } = require('./secrets');
+const audit = require('./audit');
 
 /**
  * Sessions du portail.
@@ -15,8 +16,14 @@ const { encrypt, decrypt } = require('./secrets');
  * de s'ouvrir sans authentification.
  */
 
+/**
+ * Noms des cookies. En HTTPS, préfixe « __Host- » : le navigateur exige alors
+ * Secure, Path=/ et aucun Domain, si bien qu'un sous-domaine ne peut ni lire
+ * ni imposer le cookie de session. En HTTP (développement local), noms simples.
+ */
 const COOKIE_NAME = 'asp_session';
 const STATE_COOKIE = 'asp_oauth_state';
+const HOST_PREFIX = '__Host-';
 
 /** 'awx' (SSO actif), 'disabled' (portail ouvert, dev) ou 'misconfigured' (fermé). */
 const authMode = () => {
@@ -35,7 +42,16 @@ const sessionTtlHours = () => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 12;
 };
 
+/** Minutes d'inactivité avant expiration de la session (0 = pas d'expiration d'inactivité). */
+const sessionIdleMinutes = () => {
+  const parsed = Number(process.env.SESSION_IDLE_MINUTES);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 30;
+};
+
 const hashToken = (value) => crypto.createHash('sha256').update(String(value)).digest('hex');
+
+/** Adresse du client vue par le proxy de confiance (trust proxy), jamais l'en-tête brut. */
+const clientIp = (req) => String(req?.ip || req?.socket?.remoteAddress || '').slice(0, 64);
 
 const parseCookies = (header) => {
   const out = {};
@@ -65,26 +81,38 @@ const cookieSuffix = (req, maxAgeSeconds) => {
   return parts.join('; ');
 };
 
+const cookieName = (req, base) => (isSecureRequest(req) ? `${HOST_PREFIX}${base}` : base);
+
+/** Jeton de session du cookie. En HTTPS, seul le cookie « __Host- » est accepté. */
+const readSessionToken = (req) => parseCookies(req.headers.cookie)[cookieName(req, COOKIE_NAME)] || '';
+
+const readStateCookie = (req) => parseCookies(req.headers.cookie)[cookieName(req, STATE_COOKIE)] || '';
+
 const setSessionCookie = (res, req, token) => {
-  res.append('Set-Cookie', `${COOKIE_NAME}=${encodeURIComponent(token)}; ${cookieSuffix(req, sessionTtlHours() * 3600)}`);
+  res.append('Set-Cookie', `${cookieName(req, COOKIE_NAME)}=${encodeURIComponent(token)}; ${cookieSuffix(req, sessionTtlHours() * 3600)}`);
 };
 
 const clearSessionCookie = (res, req) => {
-  res.append('Set-Cookie', `${COOKIE_NAME}=; ${cookieSuffix(req, 0)}`);
+  res.append('Set-Cookie', `${cookieName(req, COOKIE_NAME)}=; ${cookieSuffix(req, 0)}`);
 };
 
 const setStateCookie = (res, req, state) => {
-  res.append('Set-Cookie', `${STATE_COOKIE}=${encodeURIComponent(state)}; ${cookieSuffix(req, 600)}`);
+  res.append('Set-Cookie', `${cookieName(req, STATE_COOKIE)}=${encodeURIComponent(state)}; ${cookieSuffix(req, 600)}`);
 };
 
 const clearStateCookie = (res, req) => {
-  res.append('Set-Cookie', `${STATE_COOKIE}=; ${cookieSuffix(req, 0)}`);
+  res.append('Set-Cookie', `${cookieName(req, STATE_COOKIE)}=; ${cookieSuffix(req, 0)}`);
 };
 
-/** Origine publique du portail (retour après le callback OAuth). */
+/**
+ * Origine publique du portail (retour après le callback OAuth). En production,
+ * PORTAL_URL est obligatoire (contrôle au démarrage) : les en-têtes Host et
+ * X-Forwarded-Host, falsifiables, ne servent qu'en développement.
+ */
 const frontendOrigin = (req) => {
   const configured = String(process.env.PORTAL_URL || '').trim().replace(/\/+$/, '');
   if (configured) return configured;
+  if (process.env.NODE_ENV === 'production') return '';
   const proto = String(req?.headers?.['x-forwarded-proto'] || req?.protocol || 'http').split(',')[0].trim();
   const host = String(req?.headers?.['x-forwarded-host'] || req?.headers?.host || '').trim();
   return host ? `${proto}://${host}` : '';
@@ -159,13 +187,20 @@ const logEvent = async ({ kind, username, role, email, req, detail }) => {
         String(username || '').slice(0, 120),
         String(role || '').slice(0, 20),
         String(email || '').slice(0, 200),
-        String(req?.headers?.['x-forwarded-for'] || req?.ip || '').split(',')[0].trim().slice(0, 64),
+        clientIp(req),
         String(detail || '').slice(0, 500),
       ],
     );
   } catch {
     /* le journal ne doit jamais bloquer une connexion */
   }
+  audit.record({
+    req,
+    action: `auth.${kind}`,
+    actor: { name: String(username || ''), role: String(role || '') },
+    status: kind === 'login_failed' ? 401 : 200,
+    detail: { email: String(email || '').slice(0, 200), detail: String(detail || '').slice(0, 500) },
+  });
 };
 
 /** Crée une session et retourne le jeton à placer dans le cookie. */
@@ -193,7 +228,7 @@ const createSession = async ({ userId, username, tokens, req }) => {
       accessExpiresAt,
       refreshExpiresAt,
       expiresAt,
-      String(req?.headers?.['x-forwarded-for'] || req?.ip || '').split(',')[0].trim().slice(0, 64),
+      clientIp(req),
       String(req?.headers?.['user-agent'] || '').slice(0, 300),
     ],
   );
@@ -220,7 +255,7 @@ const sessionUser = (row) => ({
 
 const SESSION_SELECT = `
   SELECT s.id AS session_id, s.access_token, s.refresh_token,
-         s.access_expires_at, s.refresh_expires_at, s.expires_at,
+         s.access_expires_at, s.refresh_expires_at, s.expires_at, s.last_seen_at,
          u.id AS user_id, u.name, u.initials, u.email, u.role,
          u.role_fr, u.role_en, u.tenant_id, u.awx_username, u.awx_user_id,
          u.auth_provider, u.awx_organizations, u.awx_teams, u.last_login_at
@@ -238,9 +273,14 @@ const loadSession = async (token) => {
   const { rows } = await q(SESSION_SELECT, [hashToken(token)]);
   const row = rows[0];
   if (!row) return null;
-  // Session expirée : refusée pour l'authentification. La ligne est conservée
-  // pendant le délai de grâce (lancement après approbation), puis purgée.
+  // Session expirée ou inactive : refusée pour l'authentification. La ligne est
+  // conservée pendant le délai de grâce (lancement après approbation), puis purgée.
   if (new Date(row.expires_at).getTime() < Date.now()) return null;
+  const idleMs = sessionIdleMinutes() * 60 * 1000;
+  if (idleMs > 0 && new Date(row.last_seen_at).getTime() + idleMs < Date.now()) {
+    await q('UPDATE auth_sessions SET expires_at = least(expires_at, now()) WHERE id = $1', [row.session_id]);
+    return null;
+  }
   return withPlainTokens(row);
 };
 
@@ -287,6 +327,16 @@ const destroySession = async (token) => {
 };
 
 /**
+ * Révoque toutes les sessions d'un utilisateur (déconnexion forcée). Les
+ * jetons Ascender stockés sont supprimés : aucun job approuvé ne pourra plus
+ * partir en son nom avant sa prochaine connexion.
+ */
+const revokeUserSessions = async (userId) => {
+  const { rowCount } = await q('DELETE FROM auth_sessions WHERE user_id = $1', [userId]);
+  return rowCount;
+};
+
+/**
  * Jeton AWX valide pour la session, rafraîchi si nécessaire.
  * Sera utilisé pour lancer les jobs AWX au nom de l'utilisateur.
  */
@@ -321,17 +371,19 @@ const attachSession = async (req, res, next) => {
   req.auth = { mode, session: null, user: null, token: '' };
   if (mode !== 'awx') return next();
 
-  const cookies = parseCookies(req.headers.cookie);
-  const token = cookies[COOKIE_NAME];
+  const token = readSessionToken(req);
   if (!token) return next();
 
   try {
     const row = await loadSession(token);
     if (!row) {
       clearSessionCookie(res, req);
+      req.auth.expired = true;
       return next();
     }
-    touchSession(row.session_id);
+    // Seule une activité réelle prolonge la session : le client marque
+    // « X-Activity: background » les rafraîchissements automatiques.
+    if (String(req.headers['x-activity'] || '') !== 'background') touchSession(row.session_id);
     req.auth = { mode, session: row, user: sessionUser(row), token };
   } catch {
     /* base indisponible : la route répondra 401/503 selon le cas */
@@ -343,7 +395,7 @@ const requireAuth = (req, res, next) => {
   const mode = authMode();
   if (mode === 'disabled') return next();
   if (mode === 'misconfigured') return misconfigured(res);
-  if (!req.auth?.user) return res.status(401).json({ error: 'auth_required' });
+  if (!req.auth?.user) return res.status(401).json({ error: req.auth?.expired ? 'session_expired' : 'auth_required' });
   return next();
 };
 
@@ -439,6 +491,11 @@ module.exports = {
   STATE_COOKIE,
   authMode,
   parseCookies,
+  readSessionToken,
+  readStateCookie,
+  clientIp,
+  sessionIdleMinutes,
+  revokeUserSessions,
   setSessionCookie,
   clearSessionCookie,
   setStateCookie,

@@ -4,8 +4,10 @@ const { q } = require('../db');
 const awx = require('../awx');
 const {
   authMode,
-  parseCookies,
-  STATE_COOKIE,
+  readSessionToken,
+  readStateCookie,
+  revokeUserSessions,
+  sessionIdleMinutes,
   setSessionCookie,
   clearSessionCookie,
   setStateCookie,
@@ -60,6 +62,7 @@ router.get('/config', (req, res) => {
       const parsed = Number(process.env.SESSION_TTL_HOURS);
       return Number.isFinite(parsed) && parsed > 0 ? parsed : 12;
     })(),
+    sessionIdleMinutes: sessionIdleMinutes(),
   });
 });
 
@@ -80,8 +83,7 @@ router.get('/login', (req, res) => {
 
 /** Étape 2 : AWX renvoie le code, on échange contre des jetons et on ouvre la session. */
 router.get('/callback', async (req, res) => {
-  const cookies = parseCookies(req.headers.cookie);
-  const expectedState = cookies[STATE_COOKIE];
+  const expectedState = readStateCookie(req);
   const { code, state, error, error_description: errorDescription } = req.query;
 
   if (error) {
@@ -105,6 +107,9 @@ router.get('/callback', async (req, res) => {
     const mappings = await listMappings();
     const { role, reason } = resolveRole(identity, mappings);
     const user = await upsertUser({ identity, role });
+    // Nouvelle session à chaque connexion : une éventuelle session précédente
+    // de ce navigateur est détruite (pas de fixation de session).
+    await destroySession(readSessionToken(req));
     const sessionToken = await createSession({
       userId: user.id,
       username: identity.username,
@@ -195,8 +200,7 @@ router.post('/refresh', async (req, res) => {
 });
 
 router.post('/logout', async (req, res) => {
-  const cookies = parseCookies(req.headers.cookie);
-  await destroySession(cookies.asp_session);
+  await destroySession(readSessionToken(req));
   clearSessionCookie(res, req);
   if (req.auth?.user) {
     await logEvent({
@@ -209,6 +213,50 @@ router.post('/logout', async (req, res) => {
     });
   }
   return res.json({ ok: true });
+});
+
+/** Ferme toutes les sessions de l'utilisateur courant (tous ses navigateurs). */
+router.post('/logout-all', async (req, res, next) => {
+  try {
+    const user = req.auth?.user;
+    if (!user) return res.status(401).json({ error: 'auth_required' });
+    const revoked = await revokeUserSessions(user.id);
+    clearSessionCookie(res, req);
+    return res.json({ ok: true, revoked });
+  } catch (err) { return next(err); }
+});
+
+/** Sessions actives (administration) : qui est connecté, d'où, depuis quand. */
+router.get('/sessions', requireRole('admin'), async (_req, res, next) => {
+  try {
+    const { rows } = await q(
+      `SELECT u.id AS user_id, u.name, u.role, s.awx_username, s.ip, s.user_agent,
+              s.created_at, s.last_seen_at, s.expires_at
+         FROM auth_sessions s JOIN users u ON u.id = s.user_id
+        WHERE s.expires_at > now()
+        ORDER BY s.last_seen_at DESC
+        LIMIT 200`,
+    );
+    res.json(rows.map((row) => ({
+      userId: row.user_id,
+      name: row.name,
+      role: row.role,
+      username: row.awx_username,
+      ip: row.ip,
+      userAgent: row.user_agent,
+      createdAt: row.created_at,
+      lastSeenAt: row.last_seen_at,
+      expiresAt: row.expires_at,
+    })));
+  } catch (err) { next(err); }
+});
+
+/** Déconnexion forcée d'un utilisateur (compte compromis, départ). */
+router.post('/users/:userId/revoke', requireRole('admin'), async (req, res, next) => {
+  try {
+    const revoked = await revokeUserSessions(String(req.params.userId));
+    return res.json({ ok: true, revoked });
+  } catch (err) { return next(err); }
 });
 
 /** Mappings organisation/équipe AWX -> rôle portail (administration). */

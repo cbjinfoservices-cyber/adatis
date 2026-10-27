@@ -5,13 +5,9 @@ import {
   type SystemInfo,
   type SystemMigration,
 } from '@/utils/system';
+import { csvCell } from '@/utils/csv';
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
-
-const csvCell = (value: string) => {
-  const raw = value ?? '';
-  return /[";\n\r]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
-};
 
 const formatDate = (value: string, language: string) => new Date(value).toLocaleString(language, {
   day: '2-digit',

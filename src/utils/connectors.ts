@@ -1,4 +1,5 @@
 import type { I18nText } from '@/types/catalog';
+import { csvCell } from '@/utils/csv';
 
 export type ConnectorKind =
   | 'ascender' | 'jenkins' | 'terraform' | 'gitlab' | 'azuredevops'
@@ -106,6 +107,20 @@ export const KIND_ICON: Record<ConnectorKind, string> = {
   servicenow: 'ri-ticket-2-line',
 };
 
+/** Nom des moteurs (noms de produits : non traduits). */
+export const KIND_LABEL: Record<ConnectorKind, string> = {
+  ascender: 'Ascender',
+  jenkins: 'Jenkins',
+  terraform: 'Terraform Cloud',
+  gitlab: 'GitLab CI',
+  azuredevops: 'Azure DevOps',
+  argocd: 'Argo CD',
+  rundeck: 'Rundeck',
+  servicenow: 'ServiceNow',
+};
+
+export const kindLabel = (kind: string) => KIND_LABEL[kind as ConnectorKind] || kind;
+
 export const endpointIsValid = (value: string) => {
   const raw = value.trim();
   if (!raw) return false;
@@ -185,10 +200,6 @@ export const sortConnectors = (items: Connector[], sort: ConnectorSort): Connect
   return list;
 };
 
-const csvCell = (value: string) => {
-  const raw = value ?? '';
-  return /[";\n\r]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
-};
 
 export const testsToCsv = (
   connector: Connector,
@@ -245,15 +256,6 @@ export const downloadCsv = (fileName: string, content: string) => {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 };
-
-/* --- Configuration change history (demo: no auth yet, single administrator) --- */
-
-export const CURRENT_ADMIN = 'Camille Laurent';
-
-export const recordChange = (
-  history: ConnectorChange[] | undefined,
-  change: ConnectorChange,
-): ConnectorChange[] => [change, ...(history || [])].slice(0, 30);
 
 /* --- Search --- */
 

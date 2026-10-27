@@ -13,6 +13,24 @@ spec:
     requests:
       storage: 10Gi
 ---
+# Accès réseau : TLS obligatoire et mot de passe SCRAM. Toute connexion TCP
+# en clair est refusée. Le socket Unix (interne au conteneur : sondes,
+# administration par kubectl exec) reste en confiance locale.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: asp-pg-hba
+  namespace: asp-portal
+  labels:
+    app.kubernetes.io/part-of: asp-portal
+data:
+  pg_hba.conf: |
+    local    all  all                trust
+    hostssl  all  all  0.0.0.0/0     scram-sha-256
+    hostssl  all  all  ::/0          scram-sha-256
+    host     all  all  0.0.0.0/0     reject
+    host     all  all  ::/0          reject
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -33,15 +51,44 @@ spec:
         app.kubernetes.io/name: postgres
         app.kubernetes.io/part-of: asp-portal
     spec:
+      automountServiceAccountToken: false
+      # Image alpine : utilisateur postgres = UID 70.
       securityContext:
-        fsGroup: 999
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: postgres
-          image: postgres:16-alpine
+          image: IMAGE_POSTGRES
           imagePullPolicy: IfNotPresent
+          args:
+            - -c
+            - ssl=on
+            - -c
+            - ssl_cert_file=/etc/postgresql/tls/tls.crt
+            - -c
+            - ssl_key_file=/etc/postgresql/tls/tls.key
+            - -c
+            - ssl_min_protocol_version=TLSv1.2
+            - -c
+            - hba_file=/etc/postgresql/hba/pg_hba.conf
+            - -c
+            - password_encryption=scram-sha-256
+            - -c
+            - log_connections=on
+            - -c
+            - log_disconnections=on
           ports:
             - name: postgres
               containerPort: 5432
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           env:
             - name: POSTGRES_DB
               valueFrom:
@@ -63,6 +110,16 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            - name: tls
+              mountPath: /etc/postgresql/tls
+              readOnly: true
+            - name: hba
+              mountPath: /etc/postgresql/hba
+              readOnly: true
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             exec:
               command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
@@ -86,6 +143,25 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: postgres-data
+        # Certificat serveur signé par l'autorité interne (deploy.sh). La clé
+        # appartient à root, lisible par le groupe postgres (0640 : accepté).
+        - name: tls
+          secret:
+            secretName: asp-pg-tls
+            defaultMode: 0640
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+        - name: hba
+          configMap:
+            name: asp-pg-hba
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
 ---
 apiVersion: v1
 kind: Service

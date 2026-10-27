@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/hooks/useAuth';
-import { roleLabelKey } from '@/utils/auth';
+import { roleLabelKey, signOutEverywhere } from '@/utils/auth';
 
 const ROLE_STYLES: Record<string, string> = {
   admin: 'bg-primary-500/15 text-primary-700 dark:text-primary-300',
@@ -56,6 +56,15 @@ export default function UserMenu() {
     await signOut();
     setOpen(false);
     navigate('/login', { replace: true });
+  };
+
+  /** Ferme toutes les sessions de l'utilisateur (autres navigateurs, poste oublié). */
+  const handleSignOutEverywhere = async () => {
+    try {
+      await signOutEverywhere();
+    } finally {
+      await handleSignOut();
+    }
   };
 
   if (mode === 'disabled') {
@@ -195,6 +204,14 @@ export default function UserMenu() {
             >
               <span className="w-4 h-4 flex items-center justify-center shrink-0"><i className="ri-logout-box-r-line" /></span>
               {t('auth_sign_out')}
+            </button>
+            <button
+              type="button"
+              onClick={() => { void handleSignOutEverywhere(); }}
+              className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs text-accent-700 hover:bg-accent-50 cursor-pointer"
+            >
+              <span className="w-4 h-4 flex items-center justify-center shrink-0"><i className="ri-logout-circle-r-line" /></span>
+              {t('auth_sign_out_everywhere')}
             </button>
           </div>
         </div>

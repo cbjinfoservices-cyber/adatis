@@ -31,6 +31,24 @@ const parse = async (response: Response) => {
   }
 };
 
+/**
+ * Activité réelle de l'utilisateur. L'API expire une session inactive
+ * (SESSION_IDLE_MINUTES) : les requêtes émises sans interaction récente
+ * (rafraîchissements automatiques) sont marquées « background » et ne la
+ * prolongent pas.
+ */
+const ACTIVE_WINDOW_MS = 60 * 1000;
+let lastActivity = Date.now();
+if (typeof window !== 'undefined') {
+  const markActive = () => { lastActivity = Date.now(); };
+  ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach((type) => {
+    window.addEventListener(type, markActive, { passive: true, capture: true });
+  });
+}
+
+/** Émis quand l'API signale une session expirée ou révoquée. */
+export const SESSION_EXPIRED_EVENT = 'asp:session-expired';
+
 const request = async <T>(path: string, init?: Parameters<typeof fetch>[1]): Promise<T> => {
   let response: Response;
   try {
@@ -40,6 +58,7 @@ const request = async <T>(path: string, init?: Parameters<typeof fetch>[1]): Pro
       headers: {
         Accept: 'application/json',
         ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(Date.now() - lastActivity > ACTIVE_WINDOW_MS ? { 'X-Activity': 'background' } : {}),
         ...(init?.headers || {}),
       },
     });
@@ -49,6 +68,9 @@ const request = async <T>(path: string, init?: Parameters<typeof fetch>[1]): Pro
 
   const payload = await parse(response);
   if (!response.ok) {
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT, { detail: payload }));
+    }
     throw new ApiError(`Requête ${path} refusée`, response.status, payload);
   }
   return payload as T;

@@ -5,6 +5,8 @@ const { getSettings, updateSettings, normalizeEmail } = require('../settings');
 const { recentAlerts, lastHourWindow, emailConfigured } = require('../alerts');
 const { statsForWindow } = require('../probeStore');
 const pkg = require('../../package.json');
+const audit = require('../audit');
+const { requireRole } = require('../auth');
 
 const router = express.Router();
 
@@ -213,6 +215,20 @@ router.patch('/system/settings', async (req, res) => {
   } catch (err) {
     return res.status(503).json({ error: 'settings_unavailable', message: err.message });
   }
+});
+
+/** Journal d'audit, le plus récent d'abord (`before` = id de pagination). */
+router.get('/system/audit', requireRole('admin'), async (req, res, next) => {
+  try {
+    res.json(await audit.list({ limit: req.query.limit, before: req.query.before }));
+  } catch (err) { next(err); }
+});
+
+/** Vérifie la chaîne d'empreintes : toute ligne altérée ou retirée est signalée. */
+router.get('/system/audit/verify', requireRole('admin'), async (_req, res, next) => {
+  try {
+    res.json(await audit.verify());
+  } catch (err) { next(err); }
 });
 
 module.exports = router;

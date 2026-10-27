@@ -13,6 +13,7 @@ test.before(async () => {
   await stack.db.query(
     "INSERT INTO awx_role_mappings (awx_org, awx_team, role) VALUES ('Infra', 'Approvers', 'approver')",
   );
+  await stack.linkTenant('Infra');
   admin = await stack.login('admin');
   alice = await stack.login('alice');
   bob = await stack.login('bob');

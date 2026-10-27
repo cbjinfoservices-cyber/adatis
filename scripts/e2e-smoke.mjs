@@ -44,6 +44,7 @@ const db = await PGlite.create();
 for (const file of fs.readdirSync(path.join(ROOT, 'db')).filter((f) => f.endsWith('.sql')).sort()) {
   await db.exec(fs.readFileSync(path.join(ROOT, 'db', file), 'utf8'));
 }
+await db.exec(fs.readFileSync(path.join(ROOT, 'api', 'testing', 'catalog.sql'), 'utf8'));
 await db.exec("INSERT INTO awx_role_mappings (awx_org, awx_team, role) VALUES ('Infra', 'Approvers', 'approver')");
 // Noms de tables (affichés par la page Système) : ce ne sont pas des clés de traduction.
 const TABLES = new Set((await db.query("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")).rows.map((r) => r.tablename));
@@ -68,6 +69,7 @@ Object.assign(process.env, {
   PORTAL_URL: BASE,
   AWX_REDIRECT_URI: `${BASE}/api/auth/callback`,
   RATE_LIMIT_API: '100000',
+  AUDIT_STDOUT: 'false',
 });
 const app = apiRequire('./src/server.js');
 const apiServer = await new Promise((resolve) => { const s = app.listen(apiPort, '127.0.0.1', () => resolve(s)); });
@@ -101,7 +103,8 @@ await new Promise((resolve) => { web.listen(webPort, '127.0.0.1', resolve); });
 // --- Navigateur ----------------------------------------------------------------
 const browser = await chromium.launch();
 const problems = [];
-const KEY_LIKE = /\b[a-z]+(?:_[a-z0-9]+){2,}\b/g;
+// Segments d'URL (ex. /api/v2/workflow_job_templates/) exclus : ce ne sont pas des clés.
+const KEY_LIKE = /(?<!\/)\b[a-z]+(?:_[a-z0-9]+){2,}\b/g;
 
 async function session(username, lang = 'fr') {
   mock.setUser(username);

@@ -54,14 +54,19 @@ Les tests de l'API (`api/test/`) tournent sur un vrai PostgreSQL en mémoire
 
 ## Modèle de sécurité
 
-- **Authentification** : SSO OAuth2 Ascender (`AUTH_MODE=awx`). Si l'URL, le
-  client id ou le secret manque, le portail reste **fermé** (503).
-  `AUTH_MODE=disabled` ouvre le portail sans authentification : réservé au
-  développement.
+Détail complet, exploitation et points hors code : [SECURITY.md](SECURITY.md).
+
+- **Fermé par défaut** : en production, l'API refuse de démarrer sans SSO,
+  sans `PORTAL_URL` en HTTPS, sans clé de chiffrement ou sans TLS vers
+  PostgreSQL. Le mode sans authentification n'existe qu'avec `dev:local`.
+- **Authentification** : SSO OAuth2 Ascender ; cookie `__Host-` ; expiration
+  après 30 min d'inactivité ; révocation des sessions par un administrateur.
+- **Audit** : journal en ajout seul, chaîné par empreinte (vérifiable depuis
+  la page Système) et copié en JSON sur la sortie standard pour un SIEM.
 - **Rôles** : superutilisateur Ascender ou `AWX_ADMIN_USERS` → administrateur ;
   sinon mappings organisation / équipe → approbateur ou demandeur.
 - **Périmètre** : un demandeur ne voit que ses demandes ; un approbateur celles
-  de son tenant ; un administrateur tout.
+  de son tenant (sans tenant : seulement les siennes) ; un administrateur tout.
 - **Approbation** : un service soumis à approbation ne lance rien avant la
   décision finale ; le job part alors avec le jeton du demandeur, même déconnecté
   depuis moins de `SESSION_LAUNCH_GRACE_DAYS` jours (sinon il le lance lui-même).
@@ -83,12 +88,19 @@ Les tests de l'API (`api/test/`) tournent sur un vrai PostgreSQL en mémoire
 | Variable | Rôle |
 |----------|------|
 | `DATABASE_URL` | Connexion PostgreSQL |
-| `AUTH_MODE` | `awx` (SSO obligatoire) ou `disabled` (développement) |
+| `AUTH_MODE` | `awx` (obligatoire en production) ou `disabled` (développement local) |
+| `PORTAL_URL` | Origine publique du portail, en https (obligatoire en production) |
 | `AWX_BASE_URL`, `AWX_CLIENT_ID`, `AWX_CLIENT_SECRET` | Instance Ascender et application OAuth2 |
 | `AWX_REDIRECT_URI` | Défaut : `<PORTAL_URL>/api/auth/callback` |
-| `TOKEN_ENCRYPTION_KEY` | Clé AES-256 (32 octets base64) ; défaut : dérivée du secret OAuth |
+| `TOKEN_ENCRYPTION_KEY` | Clé AES-256 (32 octets base64), obligatoire en production |
+| `TOKEN_ENCRYPTION_KEYS_PREVIOUS` | Anciennes clés pendant une rotation (`node scripts/rotate-keys.js`) |
 | `ALLOWED_ORIGINS` | Origines tierces autorisées (vide : même origine) |
-| `PG_SSL`, `PG_SSL_REJECT_UNAUTHORIZED` | TLS vers PostgreSQL (certificat vérifié par défaut) |
+| `PG_SSL`, `PG_SSL_CA_FILE` | TLS vers PostgreSQL, certificat vérifié (obligatoire en production) |
+| `SESSION_TTL_HOURS`, `SESSION_IDLE_MINUTES` | Durée maximale (12 h) et inactivité (30 min) d'une session |
+| `CONNECTOR_ALLOWED_HOSTS` | Hôtes que le test de connecteur peut appeler (obligatoire en production) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD` | Alertes email par SMTP interne |
+| `AUDIT_STDOUT` | Copie JSON du journal d'audit sur la sortie standard (`true`) |
+| `TRUST_PROXY_HOPS` | Proxys de confiance devant l'API (1) |
 | `RATE_LIMIT_API`, `RATE_LIMIT_LOGIN` | Requêtes par minute et par IP (600 / 20) |
 | `SESSION_LAUNCH_GRACE_DAYS` | Jours pendant lesquels une session expirée peut encore lancer un job approuvé (7) |
 

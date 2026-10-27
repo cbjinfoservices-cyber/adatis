@@ -4,17 +4,32 @@ on:
   push:
   pull_request:
 
+# Jeton GitHub en lecture seule par défaut : chaque job n'obtient que ce qu'il déclare.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Actions tierces épinglées par SHA de commit (un tag peut être réécrit) ;
+# Dependabot propose les mises à jour (.github/dependabot.yml).
+env:
+  TRIVY_IMAGE: aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
+
 jobs:
   web:
     name: Front (type-check, lint, build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: npm run type-check
       - run: npm run lint
       - run: npm run build
@@ -26,37 +41,111 @@ jobs:
       run:
         working-directory: api
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: api/package-lock.json
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: npm test
+
+  dependencies:
+    name: Dépendances (npm audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      # Code livré (API, bundle du navigateur) : aucune faille élevée tolérée.
+      - name: Production — faille élevée ou critique
+        run: |
+          npm audit --omit=dev --audit-level=high
+          npm --prefix api audit --omit=dev --audit-level=high
+      # Outillage de build et de test : aucune faille critique tolérée.
+      - name: Outillage — faille critique
+        run: |
+          npm audit --audit-level=critical
+          npm --prefix api audit --audit-level=critical
+
+  scan:
+    name: "Sécurité du dépôt (Trivy : vulnérabilités, secrets, configuration)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Secrets commités, lockfiles vulnérables, Dockerfiles et manifestes
+      # Kubernetes mal configurés : la CI échoue au niveau HIGH.
+      - name: Trivy (dépôt)
+        run: |
+          docker run --rm -v "$PWD:/src:ro" "$TRIVY_IMAGE" fs \
+            --scanners vuln,secret,misconfig \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+            --skip-dirs /src/node_modules --skip-dirs /src/api/node_modules \
+            /src
+
+  images:
+    name: Images (scan Trivy + SBOM CycloneDX)
+    runs-on: ubuntu-latest
+    needs: [web, api]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Construction des images
+        run: |
+          docker build -t asp-api:ci -f api/Dockerfile api
+          docker build -t asp-web:ci -f Dockerfile .
+      - name: Scan des images (HIGH, CRITICAL)
+        run: |
+          for image in asp-api:ci asp-web:ci; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" image \
+              --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$image"
+          done
+      - name: SBOM (CycloneDX)
+        run: |
+          mkdir -p sbom
+          for image in asp-api asp-web; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/sbom:/out" "$TRIVY_IMAGE" image \
+              --format cyclonedx --output "/out/${image}.cdx.json" "${image}:ci"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom
+          path: sbom/
 
   shell:
     name: Scripts shell
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: bash -n deploy/deploy.sh && sh -n db/migrate.sh
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: bash -n deploy/deploy.sh && bash -n deploy/package/install.sh && bash -n scripts/package.sh && sh -n db/migrate.sh
 
   e2e:
     name: Navigateur (Chromium, CSP de nginx.conf)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
-      - run: npm ci && npm ci --prefix api
+      - run: npm ci --ignore-scripts && npm ci --prefix api --ignore-scripts
       - run: npx playwright install --with-deps chromium
       - run: npm run build
       - run: npm run test:e2e
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-captures
           path: e2e-output/

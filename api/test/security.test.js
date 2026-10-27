@@ -17,9 +17,9 @@ test('jetons Ascender chiffrés en base et toujours utilisables', async () => {
   const { rows } = await stack.db.query('SELECT access_token, refresh_token FROM auth_sessions');
   assert.ok(rows.length > 0);
   for (const row of rows) {
-    assert.match(row.access_token, /^v1:/);
+    assert.match(row.access_token, /^v2:[0-9a-f]{8}:/);
     assert.ok(!row.access_token.includes('tok-'));
-    assert.match(row.refresh_token, /^v1:/);
+    assert.match(row.refresh_token, /^v2:[0-9a-f]{8}:/);
   }
   const identity = await stack.call('GET', '/api/auth/identity', { cookie });
   assert.equal(identity.status, 200);

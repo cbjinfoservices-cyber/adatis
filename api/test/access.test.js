@@ -16,6 +16,7 @@ test.before(async () => {
   await stack.db.query(
     "INSERT INTO awx_role_mappings (awx_org, awx_team, role) VALUES ('Infra', 'Approvers', 'approver')",
   );
+  await stack.linkTenant('Infra');
   admin = await stack.login('admin');
   alice = await stack.login('alice');
   bob = await stack.login('bob');
@@ -41,8 +42,6 @@ test('un demandeur ne voit que ses demandes', async () => {
   assert.ok(list.body.length >= 1);
   assert.ok(list.body.every((r) => r.id !== carolReq));
   assert.ok(list.body.some((r) => r.id === aliceReq));
-  // Les demandes de démonstration (autres utilisateurs) sont exclues.
-  assert.ok(list.body.every((r) => !r.id.startsWith('REQ-2026-48')));
 });
 
 test('la recherche reste limitée au périmètre', async () => {
@@ -76,12 +75,49 @@ test('jobs, approbations et audit filtrés pour un demandeur', async () => {
   assert.equal(carolAudit.body.length, 1);
 });
 
-test('approbateur (sans tenant) et administrateur voient tout', async () => {
+test('approbateur : son tenant ; administrateur : tout', async () => {
   for (const cookie of [bob, admin]) {
     // eslint-disable-next-line no-await-in-loop
     const list = await stack.call('GET', '/api/requests?limit=200', { cookie });
     const ids = list.body.map((r) => r.id);
     assert.ok(ids.includes(aliceReq) && ids.includes(carolReq));
+  }
+});
+
+test('approbateur sans tenant : périmètre fermé, aucune décision possible', async () => {
+  const pending = await stack.call('POST', '/api/requests', {
+    cookie: carol, body: { serviceId: 'create-linux-server', payload: PAYLOADS['create-linux-server'] },
+  });
+  await stack.db.query("UPDATE users SET tenant_id = NULL WHERE awx_username = 'bob'");
+  try {
+    const list = await stack.call('GET', '/api/requests?limit=200', { cookie: bob });
+    const ids = list.body.map((r) => r.id);
+    assert.ok(!ids.includes(aliceReq) && !ids.includes(carolReq));
+
+    const decision = await stack.call('POST', `/api/approvals/${pending.body.approvalId}/decision`, {
+      cookie: bob, body: { decision: 'approved' },
+    });
+    assert.equal(decision.status, 404);
+  } finally {
+    await stack.db.query("UPDATE users SET tenant_id = 'infra' WHERE awx_username = 'bob'");
+  }
+});
+
+test('approbateur d’un autre tenant : décision refusée (404)', async () => {
+  const pending = await stack.call('POST', '/api/requests', {
+    cookie: carol, body: { serviceId: 'create-linux-server', payload: PAYLOADS['create-linux-server'] },
+  });
+  await stack.db.query("INSERT INTO tenants (id, name, platform_name) VALUES ('autre', 'Autre', 'Portal') ON CONFLICT DO NOTHING");
+  await stack.db.query("UPDATE users SET tenant_id = 'autre' WHERE awx_username = 'bob'");
+  try {
+    const decision = await stack.call('POST', `/api/approvals/${pending.body.approvalId}/decision`, {
+      cookie: bob, body: { decision: 'approved' },
+    });
+    assert.equal(decision.status, 404);
+    const state = await stack.db.query('SELECT decision FROM approvals WHERE id = $1', [pending.body.approvalId]);
+    assert.equal(state.rows[0].decision, 'pending');
+  } finally {
+    await stack.db.query("UPDATE users SET tenant_id = 'infra' WHERE awx_username = 'bob'");
   }
 });
 

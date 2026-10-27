@@ -1,3 +1,12 @@
+# =============================================================================
+# Référence des clés de la ConfigMap asp-config.
+#
+# deploy.sh crée cette ConfigMap à partir de ses variables : ce fichier n'est
+# PAS appliqué par le script (il écraserait la configuration). Il documente
+# les clés et sert de base pour un déploiement manuel.
+# Les secrets (client OAuth, clé de chiffrement, SMTP) sont dans asp-auth,
+# asp-mail et asp-db, jamais ici.
+# =============================================================================
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,27 +15,31 @@ metadata:
   labels:
     app.kubernetes.io/part-of: asp-portal
 data:
-  # Origines tierces autorisées à appeler l'API (séparées par des virgules).
+  # Origines tierces autorisées à appeler l'API (https://, séparées par des virgules).
   # Vide : le portail et l'API partagent la même origine via l'Ingress.
   ALLOWED_ORIGINS: ""
-  # "true" : cookie de session toujours Secure (positionné par deploy.sh
-  # derrière l'Ingress HTTPS). Vide : déduit de X-Forwarded-Proto.
-  COOKIE_SECURE: ""
+  # Toujours "true" en production : cookie de session Secure et préfixé __Host-.
+  COOKIE_SECURE: "true"
   # URL de l'API consommée par le SPA (injectée au build, cf. deploy.sh).
   API_URL: "/api"
-  # Destinataire des alertes de disponibilité (valeur par défaut, modifiable
-  # depuis la page Système). Vide = aucune alerte email.
-  ALERT_EMAIL_TO: ""
-  # URL publique du portail, reprise dans le corps des emails d'alerte.
+  # URL publique du portail, en https:// (origine de confiance, retour OAuth).
   PORTAL_URL: ""
-  # --- Authentification SSO AWX ---------------------------------------------
-  # disabled = portail ouvert, sans authentification (développement).
-  # awx = connexion OAuth2 Ascender obligatoire ; portail fermé (503) tant que
-  # l'URL, le client id et le client secret ne sont pas tous fournis.
-  AUTH_MODE: "disabled"
+  # --- Authentification SSO Ascender (obligatoire en production) -----------
+  AUTH_MODE: "awx"
   AWX_BASE_URL: ""
   AWX_CLIENT_ID: ""
   AWX_SCOPES: "read write"
-  # Liste d'identifiants AWX promus administrateurs en plus des superusers.
+  # Identifiants Ascender promus administrateurs en plus des superutilisateurs.
   AWX_ADMIN_USERS: ""
   SESSION_TTL_HOURS: "12"
+  SESSION_IDLE_MINUTES: "30"
+  # Hôtes que le test de connecteur peut appeler (ex. "jenkins.acme.fr,*.ci.acme.fr").
+  CONNECTOR_ALLOWED_HOSTS: ""
+  # --- Alertes email ---------------------------------------------------------
+  ALERT_EMAIL_TO: ""
+  ALERT_EMAIL_FROM: ""
+  SMTP_HOST: ""
+  SMTP_PORT: ""
+  SMTP_SECURE: ""
+  # "true" seulement pour accepter l'envoi par le service externe Resend.
+  ALLOW_EXTERNAL_MAIL: "false"

@@ -16,9 +16,16 @@ spec:
         app.kubernetes.io/part-of: asp-portal
     spec:
       restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         - name: wait-for-postgres
-          image: busybox:1.36
+          image: IMAGE_BUSYBOX
           command:
             - sh
             - -c
@@ -26,15 +33,37 @@ spec:
               until nc -z postgres 5432; do
                 echo "attente de postgres…"; sleep 2;
               done
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
       containers:
         - name: migrate
-          image: postgres:16-alpine
+          image: IMAGE_POSTGRES
           command: ["/bin/sh", "/sql/migrate.sh"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           env:
             - name: PGHOST
               value: postgres
             - name: PGPORT
               value: "5432"
+            # TLS vérifié : certificat signé par l'autorité interne et nom d'hôte contrôlé.
+            - name: PGSSLMODE
+              value: verify-full
+            - name: PGSSLROOTCERT
+              value: /etc/asp/pg-tls/ca.crt
             - name: PGDATABASE
               valueFrom:
                 secretKeyRef:
@@ -54,6 +83,9 @@ spec:
             - name: sql
               mountPath: /sql
               readOnly: true
+            - name: pg-tls
+              mountPath: /etc/asp/pg-tls
+              readOnly: true
           resources:
             requests:
               cpu: 50m
@@ -66,3 +98,9 @@ spec:
           configMap:
             name: asp-db-init
             defaultMode: 0755
+        - name: pg-tls
+          secret:
+            secretName: asp-pg-tls
+            items:
+              - key: ca.crt
+                path: ca.crt

@@ -29,7 +29,7 @@ async function resolveActor(req) {
     };
   }
   if (authMode() !== 'disabled') return null;
-  const actorId = String(req.body?.actorId || 'u-camille');
+  const actorId = String(req.body?.actorId || '');
   const { rows } = await q('SELECT id, name, role_fr, role_en FROM users WHERE id = $1', [actorId]);
   const row = rows[0];
   return row
@@ -94,6 +94,13 @@ router.post('/approvals/:id/decision', async (req, res, next) => {
 
     const actor = await resolveActor(req);
     if (!actor) return res.status(401).json({ error: 'auth_required' });
+
+    // Un approbateur ne décide que dans son périmètre (son tenant) : hors
+    // périmètre, la demande est inconnue pour lui, comme en lecture.
+    const target = await q('SELECT user_id, tenant_id FROM approvals WHERE id = $1', [req.params.id]);
+    if (!target.rows.length || !canSee(scopeOf(req), target.rows[0])) {
+      return res.status(404).json({ error: 'approval_not_found' });
+    }
 
     const outcome = await withTransaction((client) => approvalFlow.decide(client, {
       approvalId: req.params.id,

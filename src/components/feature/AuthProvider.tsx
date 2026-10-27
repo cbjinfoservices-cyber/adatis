@@ -6,6 +6,7 @@ import {
   type AuthConfig, type AuthMe,
 } from '@/utils/auth';
 import { AuthContext, EMPTY_PERMISSIONS, type AuthContextValue } from '@/hooks/useAuth';
+import { SESSION_EXPIRED_EVENT } from '@/utils/api';
 
 export default function AuthProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<AuthConfig | null>(null);
@@ -29,6 +30,20 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Session expirée (inactivité) ou révoquée par un administrateur : retour à
+  // l'écran de connexion, qui en affiche la raison.
+  useEffect(() => {
+    const onExpired = () => {
+      setMe((previous) => (previous?.authenticated
+        ? {
+          ...previous, authenticated: false, user: null, permissions: EMPTY_PERMISSIONS, expired: true,
+        }
+        : previous));
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  }, []);
 
   const signOut = useCallback(async () => {
     try {

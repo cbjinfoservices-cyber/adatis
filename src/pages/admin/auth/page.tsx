@@ -7,13 +7,15 @@ import ReadOnlyNotice from '@/components/base/ReadOnlyNotice';
 import useReadOnly from '@/hooks/useReadOnly';
 import { useAuth } from '@/hooks/useAuth';
 import {
-  createMapping, deleteMapping, fetchAuthEvents, fetchAwxIdentity, fetchMappings,
-  type AuthEvent, type AwxIdentity, type MappingsPayload, type PortalRole,
+  createMapping, deleteMapping, fetchActiveSessions, fetchAuthEvents, fetchAwxIdentity, fetchMappings,
+  revokeUserSessions,
+  type ActiveSession, type AuthEvent, type AwxIdentity, type MappingsPayload, type PortalRole,
 } from '@/utils/auth';
 import AuthStatusCard from '@/pages/admin/auth/components/AuthStatusCard';
 import AuthIdentityCard from '@/pages/admin/auth/components/AuthIdentityCard';
 import AuthMappingsCard from '@/pages/admin/auth/components/AuthMappingsCard';
 import AuthEventsCard from '@/pages/admin/auth/components/AuthEventsCard';
+import AuthSessionsCard from '@/pages/admin/auth/components/AuthSessionsCard';
 
 type Toast = { id: number; message: string; tone: 'info' | 'error' };
 
@@ -26,6 +28,8 @@ export default function AuthAdminPage() {
 
   const [payload, setPayload] = useState<MappingsPayload | null>(null);
   const [events, setEvents] = useState<AuthEvent[]>([]);
+  const [sessions, setSessions] = useState<ActiveSession[]>([]);
+  const [revoking, setRevoking] = useState<string | null>(null);
   const [identity, setIdentity] = useState<AwxIdentity | null>(null);
   const [identityError, setIdentityError] = useState(false);
   const [identityLoading, setIdentityLoading] = useState(true);
@@ -49,16 +53,22 @@ export default function AuthAdminPage() {
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [mappings, nextEvents] = await Promise.all([fetchMappings(), fetchAuthEvents()]);
+      const [mappings, nextEvents, nextSessions] = await Promise.all([
+        fetchMappings(),
+        fetchAuthEvents(),
+        // Sessions actives : réservées aux administrateurs.
+        mode === 'awx' && user?.role === 'admin' ? fetchActiveSessions() : Promise.resolve([]),
+      ]);
       setPayload(mappings);
       setEvents(nextEvents);
+      setSessions(nextSessions);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : null);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [mode, user?.role]);
 
   const loadIdentity = useCallback(async () => {
     setIdentityLoading(true);
@@ -101,6 +111,20 @@ export default function AuthAdminPage() {
       notify(t('auth_mapping_deleted'));
     } catch {
       notify(t('auth_mapping_delete_failed'), 'error');
+    }
+  };
+
+  const handleRevoke = async (session: ActiveSession) => {
+    if (!window.confirm(t('auth_sessions_revoke_confirm', { name: session.name }))) return;
+    setRevoking(session.userId);
+    try {
+      const result = await revokeUserSessions(session.userId);
+      await load(true);
+      notify(t('auth_sessions_revoked', { name: session.name, count: result.revoked }));
+    } catch {
+      notify(t('auth_sessions_revoke_failed'), 'error');
+    } finally {
+      setRevoking(null);
     }
   };
 
@@ -194,6 +218,16 @@ export default function AuthAdminPage() {
               onCreate={handleCreate}
               onDelete={handleDelete}
             />
+
+            {mode === 'awx' && user?.role === 'admin' && (
+              <AuthSessionsCard
+                sessions={sessions}
+                loading={loading}
+                currentUserId={user.id}
+                revoking={revoking}
+                onRevoke={(session) => { void handleRevoke(session); }}
+              />
+            )}
 
             <AuthEventsCard events={events} loading={loading} mode={mode} />
           </>

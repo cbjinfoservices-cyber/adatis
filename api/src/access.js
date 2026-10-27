@@ -4,7 +4,8 @@ const { authMode } = require('./auth');
  * Périmètre de lecture de l'utilisateur courant.
  *
  *   admin     : tout
- *   approver  : les demandes de son tenant (tout s'il n'a pas de tenant)
+ *   approver  : les demandes de son tenant ; sans tenant, seulement les siennes
+ *               (périmètre fermé par défaut, jamais « tout »)
  *   requester : uniquement ses propres demandes
  *
  * Sans SSO (AUTH_MODE=disabled, mode développement), aucun filtre.
@@ -14,7 +15,7 @@ const scopeOf = (req) => {
   if (authMode() === 'disabled' || !user) return { all: true, user: null };
   if (user.role === 'admin') return { all: true, user };
   if (user.role === 'approver') {
-    return user.tenantId ? { all: false, user, tenantId: user.tenantId } : { all: true, user };
+    return user.tenantId ? { all: false, user, tenantId: user.tenantId } : { all: false, user, ownOnly: true };
   }
   return { all: false, user, ownOnly: true };
 };

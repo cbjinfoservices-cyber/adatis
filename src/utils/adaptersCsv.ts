@@ -1,9 +1,5 @@
 import type { AdapterItem } from '@/utils/store';
-
-const csvCell = (value: string) => {
-  const raw = value ?? '';
-  return /[";\n\r]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
-};
+import { csvCell } from '@/utils/csv';
 
 export interface AdapterCsvLabels {
   name: string;

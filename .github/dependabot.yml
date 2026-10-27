@@ -1,0 +1,34 @@
+# Mises à jour de sécurité proposées en pull request : relues et testées
+# par la CI avant fusion, jamais appliquées automatiquement.
+# Délai de 14 jours avant de proposer une nouvelle version : une version
+# compromise est le plus souvent retirée dans ce délai.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    open-pull-requests-limit: 10
+  - package-ecosystem: npm
+    directory: /api
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    open-pull-requests-limit: 10
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /api
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14

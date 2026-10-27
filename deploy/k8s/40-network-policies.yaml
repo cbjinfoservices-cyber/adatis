@@ -1,0 +1,200 @@
+# =============================================================================
+# Cloisonnement réseau du namespace : tout est refusé, puis seuls les flux
+# nécessaires sont ouverts. Requiert un CNI qui applique les NetworkPolicy
+# (Calico, Cilium, Antrea, Canal… ; flannel seul les ignore).
+#
+#   Contrôleur Ingress ──> asp-web:8080, asp-api:8080
+#   asp-api ──> postgres:5432, Ascender / SMTP / connecteurs (API_EGRESS_CIDR)
+#   asp-db-migrate ──> postgres:5432
+#   tous ──> DNS du cluster
+#
+# INGRESS_NAMESPACE (namespace de Traefik, kube-system sur k3s) et
+# API_EGRESS_CIDR sont remplacés par deploy.sh. Seuls les pods Traefik
+# (app.kubernetes.io/name=traefik) de ce namespace sont autorisés.
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: asp-portal
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: asp-portal
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: web-from-ingress
+  namespace: asp-portal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: asp-web
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: INGRESS_NAMESPACE
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-ingress
+  namespace: asp-portal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: asp-api
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: INGRESS_NAMESPACE
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+        # Contrôle de santé lancé par deploy.sh en fin de déploiement.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: asp-healthcheck
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-egress
+  namespace: asp-portal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: asp-api
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Ascender, serveur SMTP, connecteurs testés. Les métadonnées cloud
+    # (169.254.0.0/16) restent inaccessibles. Restreindre API_EGRESS_CIDR
+    # au réseau d'Ascender et du SMTP quand il est connu.
+    - to:
+        - ipBlock:
+            cidr: API_EGRESS_CIDR
+            except:
+              - 169.254.0.0/16
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-ingress
+  namespace: asp-portal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: asp-api
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: asp-db-migrate
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: migrate-egress
+  namespace: asp-portal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: asp-db-migrate
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: healthcheck-egress
+  namespace: asp-portal
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: asp-healthcheck
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: asp-api
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# Validation HTTP-01 de cert-manager (Let's Encrypt) : le contrôleur Ingress
+# doit joindre le pod solveur créé temporairement dans ce namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: acme-solver-from-ingress
+  namespace: asp-portal
+spec:
+  podSelector:
+    matchLabels:
+      acme.cert-manager.io/http01-solver: "true"
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: INGRESS_NAMESPACE
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 8089

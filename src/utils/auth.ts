@@ -30,6 +30,7 @@ export type AuthConfig = {
   redirectUri: string;
   scopes: string;
   sessionHours: number;
+  sessionIdleMinutes: number;
   checks: {
     baseUrl: boolean;
     clientId: boolean;
@@ -61,6 +62,8 @@ export type AuthMe = {
     expiresAt: string;
     lastSeenAt: string;
   };
+  /** Posé côté client quand l'API a refusé la session (inactivité, révocation). */
+  expired?: boolean;
 };
 
 export type AwxIdentity = {
@@ -127,3 +130,44 @@ export const startLogin = (next?: string) => {
 };
 
 export const roleLabelKey = (role: PortalRole) => `auth_role_${role}`;
+
+export const signOutEverywhere = () => api.post<{ ok: boolean; revoked: number }>('/auth/logout-all');
+
+export type ActiveSession = {
+  userId: string;
+  name: string;
+  role: PortalRole;
+  username: string;
+  ip: string;
+  userAgent: string;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+};
+
+export const fetchActiveSessions = () => api.get<ActiveSession[]>('/auth/sessions');
+
+export const revokeUserSessions = (userId: string) => (
+  api.post<{ ok: boolean; revoked: number }>(`/auth/users/${encodeURIComponent(userId)}/revoke`)
+);
+
+export type AuditEntry = {
+  id: number;
+  at: string;
+  actorId: string;
+  actorName: string;
+  actorRole: string;
+  ip: string;
+  method: string;
+  path: string;
+  action: string;
+  target: string;
+  status: number;
+  detail: { fields?: string[]; email?: string; detail?: string };
+};
+
+export type AuditVerification = { ok: boolean; count: number; brokenAt: number | null };
+
+export const fetchAuditLog = (limit = 100) => api.get<AuditEntry[]>(`/system/audit?limit=${limit}`);
+
+export const verifyAuditLog = () => api.get<AuditVerification>('/system/audit/verify');

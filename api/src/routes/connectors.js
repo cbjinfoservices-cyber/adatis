@@ -216,7 +216,8 @@ router.patch('/connectors/:id/catalog/:itemId', async (req, res, next) => {
 
 router.patch('/connectors/:id', async (req, res, next) => {
   try {
-    const { name, endpoint, notes, author = 'Camille Laurent' } = req.body || {};
+    const { name, endpoint, notes } = req.body || {};
+    const author = req.auth?.user?.name || 'Administrateur local';
     const current = await q('SELECT * FROM connectors WHERE id = $1', [req.params.id]);
     if (!current.rows.length) return res.status(404).json({ error: 'connector_not_found' });
 

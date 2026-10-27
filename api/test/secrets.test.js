@@ -15,6 +15,7 @@ test.before(async () => {
   await stack.db.query(
     "INSERT INTO awx_role_mappings (awx_org, awx_team, role) VALUES ('Infra', 'Approvers', 'approver')",
   );
+  await stack.linkTenant('Infra');
   admin = await stack.login('admin');
   alice = await stack.login('alice');
   await stack.call('PATCH', '/api/admin/services/deploy-application', { cookie: admin, body: { kind: 'job', templateId: 9 } });
@@ -32,7 +33,7 @@ test('champ mot de passe : chiffré en base, en clair seulement vers Ascender', 
 
   const payload = await storedPayload(res.body.id);
   assert.equal(payload.version, '1.4.2');
-  assert.match(payload.secret_token.$secret, /^v1:/);
+  assert.match(payload.secret_token.$secret, /^v2:[0-9a-f]{8}:/);
   assert.ok(!JSON.stringify(payload).includes('s3cr3t'));
 
   const sent = stack.ascender.state.launches.at(-1).body.extra_vars.portal_request_payload;

@@ -8,6 +8,8 @@ const { startProbing } = require('./healthMonitor');
 const {
   attachSession, requireAuth, requireRole, authMode, purgeSessions,
 } = require('./auth');
+const audit = require('./audit');
+const { configProblems, originGuard, noStore } = require('./security');
 
 const authRoutes = require('./routes/auth');
 const catalogRoutes = require('./routes/catalog');
@@ -32,7 +34,9 @@ const allowed = String(process.env.ALLOWED_ORIGINS || '')
   .map((origin) => origin.trim())
   .filter(Boolean);
 
-app.set('trust proxy', 1);
+// Nombre de proxys de confiance devant l'API (Ingress) : req.ip est l'adresse
+// qu'ils ont vue, jamais un X-Forwarded-For fourni par le client.
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS || 1));
 app.disable('x-powered-by');
 
 // HSTS en production seulement : en local, il bloquerait ensuite http://localhost.
@@ -44,6 +48,9 @@ if (allowed.includes('*')) {
 }
 app.use(compression());
 app.use(express.json({ limit: '512kb' }));
+app.use('/api', noStore);
+app.use('/api', originGuard);
+app.use('/api', audit.middleware);
 
 // Limitation de débit par adresse IP (mémoire du pod).
 const limit = (max, windowMs = 60 * 1000) => rateLimit({
@@ -78,7 +85,7 @@ app.use('/api', (req, res, next) => {
   return requireAuth(req, res, next);
 });
 
-const ADMIN_WRITE_PREFIXES = ['/adapters', '/connectors', '/tenants', '/system/settings', '/auth/mappings', '/admin/services'];
+const ADMIN_WRITE_PREFIXES = ['/adapters', '/connectors', '/tenants', '/system/settings', '/auth/mappings', '/auth/users', '/admin/services'];
 app.use('/api', (req, res, next) => {
   if (authMode() === 'disabled') return next();
   if (!['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) return next();
@@ -123,13 +130,21 @@ app.use((err, _req, res, _next) => {
 function start() {
   let stopProbing = () => {};
 
+  // Production : configuration non sûre = l'API ne démarre pas.
+  const problems = configProblems();
+  if (problems.length) {
+    console.error('[api] configuration refusée en production :');
+    problems.forEach((problem) => console.error(`[api]   - ${problem}`));
+    process.exit(1);
+  }
+
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[api] ASP portal API à l'écoute sur :${PORT}`);
     const mode = authMode();
     if (mode === 'misconfigured') {
       console.error('[api] AUTH_MODE=awx mais la configuration Ascender est incomplète (AWX_BASE_URL, AWX_CLIENT_ID, AWX_CLIENT_SECRET) : portail fermé.');
-    } else if (mode === 'disabled' && process.env.NODE_ENV === 'production') {
-      console.warn('[api] AUTH_MODE=disabled en production : le portail est ouvert sans authentification.');
+    } else if (mode === 'disabled') {
+      console.warn('[api] AUTH_MODE=disabled : portail ouvert sans authentification (développement uniquement).');
     }
     // Sonde interne toutes les 60 s : alimente l'historique 24 h même sans visiteur.
     stopProbing = startProbing();

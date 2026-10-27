@@ -1,6 +1,6 @@
 /**
  * Pile de test : PostgreSQL réel (PGlite, en mémoire) avec toutes les
- * migrations de db/, faux Ascender, et l'API Express sur un port libre.
+ * migrations de db/, catalogue de test, faux Ascender, et l'API Express sur un port libre.
  * Un fichier de test = un processus = une pile (node --test isole les fichiers).
  */
 const fs = require('fs');
@@ -27,6 +27,7 @@ async function startDatabase() {
     // eslint-disable-next-line no-await-in-loop
     await db.exec(fs.readFileSync(path.join(DB_DIR, file), 'utf8'));
   }
+  await db.exec(fs.readFileSync(path.join(__dirname, 'catalog.sql'), 'utf8'));
   const port = await freePort();
   const server = new PGLiteSocketServer({ db, port, host: '127.0.0.1' });
   await server.start();
@@ -52,6 +53,7 @@ async function startStack(env = {}) {
     AWX_CLIENT_SECRET: 'secret',
     PORTAL_URL: 'http://portal.test',
     AWX_REDIRECT_URI: 'http://portal.test/api/auth/callback',
+    AUDIT_STDOUT: 'false',
     ...env,
   });
 
@@ -101,7 +103,24 @@ async function startStack(env = {}) {
     await database.stop();
   };
 
-  return { base, call, login, ascender, db: database.db, stop };
+  /**
+   * Rattache l'organisation Ascender `org` à un tenant : ses membres le
+   * reçoivent à leur prochaine connexion. Un approbateur ne décide que dans
+   * son tenant ; sans tenant, il ne voit que ses propres demandes.
+   */
+  const linkTenant = async (org = 'Infra') => {
+    const id = org.toLowerCase();
+    await database.db.query(
+      `INSERT INTO tenants (id, name, platform_name, awx_organization) VALUES ($1, $2, 'Service Portal', $2)
+       ON CONFLICT (id) DO UPDATE SET awx_organization = EXCLUDED.awx_organization`,
+      [id, org],
+    );
+    return id;
+  };
+
+  return {
+    base, call, login, linkTenant, ascender, db: database.db, stop,
+  };
 }
 
 module.exports = { startStack };

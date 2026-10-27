@@ -8,6 +8,7 @@ const { scopeOf, scopeSql, canSee, canActOn } = require('../access');
 const awxRbac = require('../awxRbac');
 const { validatePayload, sanitizeFreePayload } = require('../formValidation');
 const { sealSecrets } = require('../secrets');
+const { isWired, engineForService, NOT_WIRED } = require('../engines');
 const { authMode, ensureAccessToken } = require('../auth');
 
 const router = express.Router();
@@ -15,11 +16,12 @@ const router = express.Router();
 const REQUEST_SELECT = `
   SELECT r.*, s.name_fr, s.name_en, s.category_id,
          u.name AS user_name, u.initials,
-         t.name AS tenant_name
+         t.name AS tenant_name, cn.name AS connector_name
   FROM requests r
   JOIN services s ON s.id = r.service_id
   LEFT JOIN users u ON u.id = r.user_id
   LEFT JOIN tenants t ON t.id = r.tenant_id
+  LEFT JOIN connectors cn ON cn.id = r.connector_id
 `;
 
 const LAUNCH_SELECT = `
@@ -98,17 +100,22 @@ router.post('/requests', async (req, res, next) => {
     const tenantId = sessionUser ? sessionUser.tenantId || null : req.body?.tenantId || null;
 
     const svc = await q(
-      `SELECT s.id, s.approval, s.awx_job_template_id, s.awx_workflow_job_template_id, f.fields
-         FROM services s LEFT JOIN form_schemas f ON f.id = s.form_id
+      `SELECT s.id, s.approval, s.awx_job_template_id, s.awx_workflow_job_template_id,
+              s.connector_id, c.kind AS connector_kind, f.fields
+         FROM services s
+         LEFT JOIN connectors c ON c.id = s.connector_id
+         LEFT JOIN form_schemas f ON f.id = s.form_id
         WHERE s.id = $1`,
       [serviceId],
     );
     if (!svc.rows.length) return res.status(404).json({ error: 'service_not_found' });
     const service = svc.rows[0];
     const { approval } = service;
+    // Moteur retenu à la commande : conservé sur la demande.
+    const engine = engineForService(service);
 
     // RBAC Ascender vérifié dès la commande, pas seulement au lancement.
-    if (req.auth?.session) {
+    if (req.auth?.session && engine === 'ascender') {
       const template = awxJobs.templateForService(service);
       const access = template ? await awxRbac.accessForSession(req.auth.session) : null;
       if (template && !awxRbac.allowed(access, template.kind, template.id)) {
@@ -137,12 +144,14 @@ router.post('/requests', async (req, res, next) => {
 
       await client.query(
         `INSERT INTO requests (id, service_id, user_id, tenant_id, environment, status, progress,
-                               approval, approval_state, business_type, payload)
-         VALUES ($1,$2,$3,$4,$5,'queued',0,$6,$7,'custom',$8)`,
+                               approval, approval_state, business_type, payload,
+                               connector_id, connector_kind)
+         VALUES ($1,$2,$3,$4,$5,'queued',0,$6,$7,'custom',$8,$9,$10)`,
         [id, serviceId, userId, tenantId, environment, approval,
           approval === 'none' ? 'not_required' : 'pending',
           // Champs « password » chiffrés en base, jamais stockés en clair.
-          JSON.stringify(sealSecrets(values, secretFields))],
+          JSON.stringify(sealSecrets(values, secretFields)),
+          engine ? service.connector_id : null, engine],
       );
 
       // Service soumis à approbation : circuit créé, aucun lancement immédiat.
@@ -156,7 +165,8 @@ router.post('/requests', async (req, res, next) => {
 
     // Lancement du job Ascender avec le jeton de l'utilisateur connecté.
     let launch = null;
-    if (!created.approvalId && authMode() === 'awx' && req.auth?.session) {
+    // Seuls les moteurs branchés (Ascender) lancent réellement un job.
+    if (!created.approvalId && isWired(engine) && authMode() === 'awx' && req.auth?.session) {
       const launchService = await q(LAUNCH_SELECT, [serviceId]);
       if (launchService.rows.length) {
         launch = await awxJobs.launchForRequest({
@@ -185,6 +195,9 @@ router.post('/requests/:id/awx/launch', async (req, res, next) => {
     if (!rows.length || !canSee(scopeOf(req), rows[0])) return res.status(404).json({ error: 'request_not_found' });
     if (!canActOn(scopeOf(req), rows[0])) return res.status(403).json({ error: 'forbidden' });
     if (rows[0].awx_job_id) return res.status(409).json({ error: 'awx_job_exists' });
+    if (rows[0].connector_kind && !isWired(rows[0].connector_kind)) {
+      return res.status(409).json({ error: 'engine_not_wired' });
+    }
     if (!approvalFlow.LAUNCHABLE.includes(rows[0].approval_state)) {
       return res.status(409).json({ error: `approval_${rows[0].approval_state}` });
     }
@@ -247,20 +260,39 @@ router.get('/requests/:id/awx/workflow', async (req, res, next) => {
   } catch (err) { return next(err); }
 });
 
+const emptyStats = () => ({
+  total: 0, active: 0, success: 0, failed: 0, notWired: 0,
+});
+
+const addToStats = (stats, item) => {
+  stats.total += 1;
+  if (['queued', 'running'].includes(item.portalStatus)) stats.active += 1;
+  if (item.portalStatus === 'success') stats.success += 1;
+  if (['failed', 'canceled'].includes(item.portalStatus)) stats.failed += 1;
+  if (item.portalStatus === NOT_WIRED) stats.notWired += 1;
+};
+
 /**
- * Suivi agrégé de tous les jobs AWX lancés depuis le portail.
- * `refresh=1` synchronise d'abord les jobs encore actifs (max 25 par passe).
+ * Suivi des jobs, scindé par type de connecteur (moteur).
+ *
+ * Une ligne = une demande routée vers un moteur : job lancé (Ascender) ou
+ * demande destinée à un moteur pas encore branché (statut « not_wired »).
+ * `kind` filtre un moteur ; `stats` couvre tous les moteurs et `byKind`
+ * les détaille. `refresh=1` synchronise d'abord les jobs Ascender actifs.
  */
-router.get('/awx/jobs', async (req, res, next) => {
+async function listJobs(req, res, next) {
   try {
-    const { refresh, status, user, search, limit = 200 } = req.query;
+    const {
+      refresh, status, user, search, kind, limit = 200,
+    } = req.query;
     const max = Math.min(Number(limit) || 200, 500);
 
     const params = [];
     const scoped = scopeSql(scopeOf(req), 'r', params);
     params.push(max);
     const jobsSql = `${REQUEST_SELECT}
-       WHERE r.awx_job_id IS NOT NULL${scoped ? ` AND ${scoped}` : ''}
+       WHERE (r.awx_job_id IS NOT NULL OR r.connector_kind NOT IN ('', 'ascender'))
+             ${scoped ? ` AND ${scoped}` : ''}
        ORDER BY COALESCE(r.awx_started_at, r.created_at) DESC
        LIMIT $${params.length}`;
     let { rows } = await q(jobsSql, params);
@@ -280,19 +312,36 @@ router.get('/awx/jobs', async (req, res, next) => {
 
     const items = rows.map((row) => {
       const base = m.request(row);
+      const engine = base.engine.kind || 'ascender';
       return {
         ...base,
         jobKind: base.awx?.kind || 'job',
         awxStatus: base.awx?.status || '',
-        portalStatus: awx.portalStatus(base.awx?.status) || '',
+        portalStatus: isWired(engine) ? awx.portalStatus(base.awx?.status) || '' : NOT_WIRED,
       };
+    });
+
+    // Types présents : connecteurs configurés + moteurs vus dans les demandes.
+    const connectorKinds = await q('SELECT DISTINCT kind FROM connectors');
+    const kinds = [...new Set([
+      ...connectorKinds.rows.map((r) => r.kind),
+      ...items.map((item) => item.engine.kind || 'ascender'),
+    ])].sort((a, b) => (a === 'ascender' ? -1 : b === 'ascender' ? 1 : a.localeCompare(b)));
+
+    const stats = emptyStats();
+    const byKind = Object.fromEntries(kinds.map((k) => [k, { ...emptyStats(), wired: isWired(k) }]));
+    items.forEach((item) => {
+      addToStats(stats, item);
+      addToStats(byKind[item.engine.kind || 'ascender'], item);
     });
 
     const needle = String(search || '').trim().toLowerCase();
     const userNeedle = String(user || '').trim().toLowerCase();
     const wanted = String(status || '').trim().toLowerCase();
+    const wantedKind = String(kind || '').trim().toLowerCase();
 
     const filtered = items.filter((item) => {
+      if (wantedKind && wantedKind !== 'all' && (item.engine.kind || 'ascender') !== wantedKind) return false;
       if (wanted && wanted !== 'all') {
         const raw = String(item.awxStatus || '').toLowerCase();
         const mapped = String(item.portalStatus || '').toLowerCase();
@@ -300,21 +349,20 @@ router.get('/awx/jobs', async (req, res, next) => {
       }
       if (userNeedle && String(item.user || '').toLowerCase() !== userNeedle) return false;
       if (!needle) return true;
-      return `${item.id} ${item.service.fr} ${item.service.en} ${item.user} ${item.tenant} ${item.awx?.templateName || ''}`
+      return `${item.id} ${item.service.fr} ${item.service.en} ${item.user} ${item.tenant} ${item.awx?.templateName || ''} ${item.engine.kind} ${item.engine.connectorName}`
         .toLowerCase()
         .includes(needle);
     });
 
-    const stats = {
-      total: items.length,
-      active: items.filter((item) => ['queued', 'running'].includes(item.portalStatus)).length,
-      success: items.filter((item) => item.portalStatus === 'success').length,
-      failed: items.filter((item) => ['failed', 'canceled'].includes(item.portalStatus)).length,
-    };
-
-    return res.json({ items: filtered, stats, fetchedAt: new Date().toISOString() });
+    return res.json({
+      items: filtered, stats, byKind, kinds, fetchedAt: new Date().toISOString(),
+    });
   } catch (err) { return next(err); }
-});
+}
+
+router.get('/jobs', listJobs);
+// Ancienne adresse (suivi Ascender seul), conservée pour compatibilité.
+router.get('/awx/jobs', listJobs);
 
 router.patch('/requests/:id', async (req, res, next) => {
   try {

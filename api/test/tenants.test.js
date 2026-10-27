@@ -8,6 +8,13 @@ let admin;
 
 test.before(async () => {
   stack = await startStack();
+  await stack.db.exec(`
+    INSERT INTO tenants (id, name, platform_name) VALUES
+      ('acme', 'Acme Corp', 'Acme Automation'),
+      ('contoso', 'Contoso Industries', 'Contoso Cloud Ops');
+    INSERT INTO requests (id, service_id, tenant_id) VALUES
+      ('REQ-CONTOSO-1', 'create-dns-record', 'contoso');
+  `);
   await stack.db.query(
     "INSERT INTO awx_role_mappings (awx_org, awx_team, role) VALUES ('Infra', 'Approvers', 'approver')",
   );
@@ -52,7 +59,7 @@ test('demandes rattachées au tenant ; l’approbateur ne voit que son tenant', 
   const tenants = await stack.db.query('SELECT DISTINCT tenant_id FROM requests WHERE id = ANY($1)', [ids]);
   assert.deepEqual(tenants.rows.map((r) => r.tenant_id), ['acme']);
 
-  // Les données de démonstration contiennent d'autres tenants : invisibles pour bob.
+  // La demande du tenant contoso existe mais reste invisible pour bob.
   const all = await stack.db.query("SELECT count(*)::int AS n FROM requests WHERE tenant_id <> 'acme'");
   assert.ok(all.rows[0].n > 0);
 });

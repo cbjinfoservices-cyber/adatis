@@ -23,21 +23,38 @@
 #     TLS_CERT_FILE / TLS_KEY_FILE  certificat et clé PEM fournis
 #     ou un secret TLS asp-portal-tls déjà présent dans le namespace
 #   ASCENDER_CA_FILE    certificat PEM de l'autorité interne qui signe Ascender
-#   AWX_ALLOW_HTTP      true pour accepter un AWX_BASE_URL en http:// (déconseillé)
 #   FORCE_DB_PASSWORD   impose un mot de passe (sinon réutilisé/créé automatiquement)
-#   ALERT_EMAIL_TO      destinataire des alertes de disponibilité (défaut : vide)
-#   ALERT_EMAIL_FROM    expéditeur des alertes (défaut : alertes@<domaine Resend>)
-#   RESEND_API_KEY      active l'envoi réel des alertes email (secret asp-alerts)
-#   PORTAL_URL          URL publique reprise dans les emails (défaut : https://${DOMAIN})
-#   AUTH_MODE           disabled (défaut) ou awx pour imposer le SSO AWX
-#   AWX_BASE_URL        URL de base de l'AWX (ex. https://awx.acme.fr)
-#   AWX_CLIENT_ID       application OAuth2 créée dans AWX
-#   AWX_CLIENT_SECRET   secret de l'application (secret Kubernetes asp-auth)
-#   TOKEN_ENCRYPTION_KEY clé AES-256 des jetons en base (32 octets base64 ; sinon conservée ou générée)
+#   PORTAL_URL          URL publique en https:// (défaut : https://${DOMAIN}) — obligatoire
+#
+#   SSO Ascender (obligatoire : l'API refuse de démarrer sans) :
+#   AWX_BASE_URL        URL de base d'Ascender, en https:// (ex. https://awx.acme.fr)
+#   AWX_CLIENT_ID       application OAuth2 créée dans Ascender
+#   AWX_CLIENT_SECRET   secret de l'application (secret asp-auth ; réutilisé s'il existe)
 #   AWX_SCOPES          scopes demandés (défaut : read write)
-#   AWX_ADMIN_USERS     identifiants AWX promus admin (séparés par des virgules)
+#   AWX_ADMIN_USERS     identifiants Ascender promus admin (séparés par des virgules)
 #   AWX_REDIRECT_URI    défaut : ${PORTAL_URL}/api/auth/callback
-#   SESSION_TTL_HOURS   durée de session portail (défaut : 12)
+#
+#   Sessions et chiffrement :
+#   SESSION_TTL_HOURS   durée maximale d'une session (défaut : 12)
+#   SESSION_IDLE_MINUTES expiration après inactivité (défaut : 30)
+#   TOKEN_ENCRYPTION_KEY clé AES-256 des jetons en base (32 octets base64 ; sinon conservée ou générée)
+#   TOKEN_ENCRYPTION_KEYS_PREVIOUS anciennes clés (rotation) : les données sont
+#                       re-chiffrées automatiquement après le déploiement
+#
+#   Réseau :
+#   INGRESS_NAMESPACE   namespace de Traefik, contrôleur Ingress requis (défaut : détecté, sinon kube-system)
+#   API_EGRESS_CIDR     réseau joignable par l'API : Ascender, SMTP, connecteurs (défaut : 0.0.0.0/0)
+#   CONNECTOR_ALLOWED_HOSTS hôtes que le test de connecteur peut appeler (ex. jenkins.acme.fr,*.ci.acme.fr)
+#
+#   Alertes email :
+#   ALERT_EMAIL_TO      destinataire des alertes de disponibilité (défaut : vide)
+#   ALERT_EMAIL_FROM    expéditeur des alertes
+#   SMTP_HOST / SMTP_PORT / SMTP_SECURE  serveur SMTP interne (TLS obligatoire)
+#   SMTP_USER / SMTP_PASSWORD            identifiants SMTP (secret asp-mail)
+#   RESEND_API_KEY      service externe Resend : refusé sauf ALLOW_EXTERNAL_MAIL=true
+#
+#   Images tierces (épinglées par empreinte ; install.sh les remplace par le tag importé) :
+#   POSTGRES_IMAGE / BUSYBOX_IMAGE
 # =============================================================================
 set -euo pipefail
 
@@ -60,8 +77,14 @@ TLS_MODE=""
 ALERT_EMAIL_TO="${ALERT_EMAIL_TO:-}"
 ALERT_EMAIL_FROM="${ALERT_EMAIL_FROM:-}"
 RESEND_API_KEY="${RESEND_API_KEY:-}"
+ALLOW_EXTERNAL_MAIL="${ALLOW_EXTERNAL_MAIL:-false}"
+SMTP_HOST="${SMTP_HOST:-}"
+SMTP_PORT="${SMTP_PORT:-}"
+SMTP_SECURE="${SMTP_SECURE:-}"
+SMTP_USER="${SMTP_USER:-}"
+SMTP_PASSWORD="${SMTP_PASSWORD:-}"
 PORTAL_URL="${PORTAL_URL:-${DOMAIN:+https://${DOMAIN}}}"
-AUTH_MODE="${AUTH_MODE:-disabled}"
+AUTH_MODE="${AUTH_MODE:-awx}"
 AWX_BASE_URL="${AWX_BASE_URL:-}"
 AWX_CLIENT_ID="${AWX_CLIENT_ID:-}"
 AWX_CLIENT_SECRET="${AWX_CLIENT_SECRET:-}"
@@ -69,6 +92,13 @@ AWX_SCOPES="${AWX_SCOPES:-read write}"
 AWX_ADMIN_USERS="${AWX_ADMIN_USERS:-}"
 AWX_REDIRECT_URI="${AWX_REDIRECT_URI:-${PORTAL_URL:+${PORTAL_URL}/api/auth/callback}}"
 SESSION_TTL_HOURS="${SESSION_TTL_HOURS:-12}"
+SESSION_IDLE_MINUTES="${SESSION_IDLE_MINUTES:-30}"
+TOKEN_ENCRYPTION_KEYS_PREVIOUS="${TOKEN_ENCRYPTION_KEYS_PREVIOUS:-}"
+CONNECTOR_ALLOWED_HOSTS="${CONNECTOR_ALLOWED_HOSTS:-}"
+INGRESS_NAMESPACE="${INGRESS_NAMESPACE:-}"
+API_EGRESS_CIDR="${API_EGRESS_CIDR:-0.0.0.0/0}"
+POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:16.15-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab}"
+BUSYBOX_IMAGE="${BUSYBOX_IMAGE:-busybox:1.36.1@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662}"
 
 SKIP_BUILD=false
 RESET_DB=false
@@ -99,14 +129,20 @@ done
 # ---------------------------------------------------------------------------
 log "Vérification des prérequis"
 command -v kubectl >/dev/null 2>&1 || fail "kubectl est introuvable"
-kubectl cluster-info >/dev/null 2>&1 || fail "Aucun cluster joignable (vérifie ton kubeconfig)"
-command -v docker >/dev/null 2>&1 || fail "docker est introuvable"
+if ! KUBECTL_ERR="$(kubectl cluster-info 2>&1 >/dev/null)"; then
+  fail "Cluster injoignable avec le kubeconfig ${KUBECONFIG:-~/.kube/config} (variable KUBECONFIG pour un autre fichier) : ${KUBECTL_ERR##*$'\n'}"
+fi
+if [ "${SKIP_BUILD}" = false ]; then
+  command -v docker >/dev/null 2>&1 || fail "docker est introuvable"
+fi
 ok "Cluster : $(kubectl config current-context)"
 
 # HTTPS : vérifié avant toute construction d'image. Un portail exposé sur un
 # domaine n'est jamais déployé sans certificat (le contrôleur servirait sinon
 # son « Fake Certificate » sans rien signaler).
 if [ "${WITH_INGRESS}" = true ] && [ -n "${DOMAIN}" ]; then
+  kubectl get crd middlewares.traefik.io >/dev/null 2>&1 \
+    || fail "Traefik (CRD traefik.io) introuvable : contrôleur Ingress requis (inclus dans k3s), ou --no-ingress"
   if [ -n "${TLS_CERT_FILE}" ] || [ -n "${TLS_KEY_FILE}" ]; then
     [ -f "${TLS_CERT_FILE}" ] || fail "TLS_CERT_FILE introuvable : ${TLS_CERT_FILE}"
     [ -f "${TLS_KEY_FILE}" ] || fail "TLS_KEY_FILE introuvable : ${TLS_KEY_FILE}"
@@ -128,17 +164,38 @@ if [ "${WITH_INGRESS}" = true ] && [ -n "${DOMAIN}" ]; then
   ok "HTTPS : certificat via ${TLS_MODE}"
 fi
 
-# Portail -> Ascender : jetons et mots de passe y transitent, HTTPS exigé.
-case "${AWX_BASE_URL:-}" in
-  http://*)
-    [ "${AWX_ALLOW_HTTP:-false}" = true ] \
-      || fail "AWX_BASE_URL doit être en https:// (jetons et mots de passe y transitent) ; AWX_ALLOW_HTTP=true pour passer outre"
-    warn "AWX_BASE_URL en HTTP accepté (AWX_ALLOW_HTTP=true)"
-    ;;
+# Configuration de sécurité : l'API (NODE_ENV=production) refuse de démarrer
+# si l'un de ces points manque ; on échoue ici, avant tout changement.
+case "${PORTAL_URL}" in
+  https://*) ;;
+  *) fail "PORTAL_URL doit être en https:// (fournis DOMAIN, ou PORTAL_URL derrière un équilibreur HTTPS externe)" ;;
 esac
+[ "${AUTH_MODE}" = "awx" ] || fail "AUTH_MODE doit valoir awx : le SSO Ascender est obligatoire en production"
+case "${AWX_BASE_URL}" in
+  https://*) ;;
+  "") fail "AWX_BASE_URL est obligatoire (ex. https://awx.acme.fr)" ;;
+  *) fail "AWX_BASE_URL doit être en https:// (jetons et mots de passe y transitent)" ;;
+esac
+[ -n "${AWX_CLIENT_ID}" ] || fail "AWX_CLIENT_ID est obligatoire"
+if [ -z "${AWX_CLIENT_SECRET}" ]; then
+  AWX_CLIENT_SECRET="$(kubectl -n "${NAMESPACE}" get secret asp-auth \
+    -o jsonpath='{.data.AWX_CLIENT_SECRET}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  [ -n "${AWX_CLIENT_SECRET}" ] || fail "AWX_CLIENT_SECRET est obligatoire (aucun secret asp-auth existant)"
+  log "AWX_CLIENT_SECRET existant réutilisé"
+fi
+if [ -n "${RESEND_API_KEY}" ] && [ "${ALLOW_EXTERNAL_MAIL}" != true ]; then
+  fail "RESEND_API_KEY envoie les emails par un service externe : utilise SMTP_HOST, ou ALLOW_EXTERNAL_MAIL=true pour l'accepter"
+fi
+command -v openssl >/dev/null 2>&1 || fail "openssl est introuvable (certificats TLS de PostgreSQL)"
 if [ -n "${ASCENDER_CA_FILE:-}" ]; then
   [ -f "${ASCENDER_CA_FILE}" ] || fail "ASCENDER_CA_FILE introuvable : ${ASCENDER_CA_FILE}"
 fi
+if [ -z "${INGRESS_NAMESPACE}" ]; then
+  INGRESS_NAMESPACE="$(kubectl get pods -A -l app.kubernetes.io/name=traefik \
+    -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || true)"
+  INGRESS_NAMESPACE="${INGRESS_NAMESPACE:-kube-system}"
+fi
+ok "Traefik attendu dans le namespace ${INGRESS_NAMESPACE} (NetworkPolicy)"
 
 CLUSTER_KIND="$(kubectl config view --minify -o jsonpath='{.contexts[0].context.cluster}' 2>/dev/null || true)"
 IS_KIND=false
@@ -217,7 +274,17 @@ kubectl -n "${NAMESPACE}" create configmap asp-config \
   --from-literal=AWX_SCOPES="${AWX_SCOPES}" \
   --from-literal=AWX_ADMIN_USERS="${AWX_ADMIN_USERS}" \
   --from-literal=SESSION_TTL_HOURS="${SESSION_TTL_HOURS}" \
+  --from-literal=SESSION_IDLE_MINUTES="${SESSION_IDLE_MINUTES}" \
+  --from-literal=CONNECTOR_ALLOWED_HOSTS="${CONNECTOR_ALLOWED_HOSTS}" \
+  --from-literal=ALERT_EMAIL_FROM="${ALERT_EMAIL_FROM}" \
+  --from-literal=SMTP_HOST="${SMTP_HOST}" \
+  --from-literal=SMTP_PORT="${SMTP_PORT}" \
+  --from-literal=SMTP_SECURE="${SMTP_SECURE}" \
+  --from-literal=ALLOW_EXTERNAL_MAIL="${ALLOW_EXTERNAL_MAIL}" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+if [ -z "${CONNECTOR_ALLOWED_HOSTS}" ]; then
+  warn "CONNECTOR_ALLOWED_HOSTS vide : le test de joignabilité des connecteurs est désactivé"
+fi
 
 # Mot de passe : réutilisé s'il existe déjà, sinon généré et conservé dans le cluster
 EXISTING_PASSWORD=""
@@ -237,54 +304,82 @@ kubectl -n "${NAMESPACE}" create secret generic asp-db \
   --from-literal=POSTGRES_DB="${DB_NAME}" \
   --from-literal=POSTGRES_USER="${DB_USER}" \
   --from-literal=POSTGRES_PASSWORD="${DB_PASSWORD}" \
-  --from-literal=DATABASE_URL="postgres://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}?sslmode=disable" \
+  --from-literal=DATABASE_URL="postgres://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
-# Alertes email : le secret n'est créé que si une clé Resend est fournie.
-# Sans clé, l'API enregistre les alertes en base mais n'envoie rien.
-if [ -n "${RESEND_API_KEY}" ]; then
-  log "Mise à jour du secret asp-alerts (alertes email Resend)"
-  kubectl -n "${NAMESPACE}" create secret generic asp-alerts \
-    --from-literal=RESEND_API_KEY="${RESEND_API_KEY}" \
-    --from-literal=ALERT_EMAIL_FROM="${ALERT_EMAIL_FROM}" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  if [ -z "${ALERT_EMAIL_TO}" ]; then
-    warn "ALERT_EMAIL_TO vide : définis le destinataire depuis la page Système après le déploiement"
-  fi
-  ok "Envoi des alertes email activé"
+# Alertes email : SMTP interne (identifiants dans asp-mail), ou Resend si
+# explicitement accepté. Sans transport, les alertes restent en base.
+SMTP_USER="${SMTP_USER:-$(kubectl -n "${NAMESPACE}" get secret asp-mail -o jsonpath='{.data.SMTP_USER}' 2>/dev/null | base64 -d 2>/dev/null || true)}"
+SMTP_PASSWORD="${SMTP_PASSWORD:-$(kubectl -n "${NAMESPACE}" get secret asp-mail -o jsonpath='{.data.SMTP_PASSWORD}' 2>/dev/null | base64 -d 2>/dev/null || true)}"
+kubectl -n "${NAMESPACE}" create secret generic asp-mail \
+  --from-literal=SMTP_USER="${SMTP_USER}" \
+  --from-literal=SMTP_PASSWORD="${SMTP_PASSWORD}" \
+  --from-literal=RESEND_API_KEY="${RESEND_API_KEY}" \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl -n "${NAMESPACE}" delete secret asp-alerts --ignore-not-found >/dev/null 2>&1 || true
+if [ -n "${SMTP_HOST}" ]; then
+  ok "Alertes email : SMTP interne ${SMTP_HOST}"
+elif [ -n "${RESEND_API_KEY}" ]; then
+  warn "Alertes email : service externe Resend (ALLOW_EXTERNAL_MAIL=true)"
 else
-  warn "RESEND_API_KEY absent : les alertes seront enregistrées mais aucun email ne sera envoyé"
+  warn "Aucun transport email (SMTP_HOST) : les alertes seront enregistrées sans envoi"
 fi
 
-# SSO Ascender : secret créé uniquement si le client secret est fourni.
-# Sans lui, AUTH_MODE=awx ferme le portail (503) jusqu'à configuration complète.
-if [ -n "${AWX_CLIENT_SECRET}" ]; then
-  log "Mise à jour du secret asp-auth (SSO Ascender)"
-  # Clé de chiffrement des jetons : fournie, sinon reprise du secret existant,
-  # sinon générée (la changer déconnecte simplement les utilisateurs).
-  if [ -z "${TOKEN_ENCRYPTION_KEY:-}" ]; then
-    TOKEN_ENCRYPTION_KEY="$(kubectl -n "${NAMESPACE}" get secret asp-auth \
-      -o jsonpath='{.data.TOKEN_ENCRYPTION_KEY}' 2>/dev/null | base64 -d 2>/dev/null || true)"
-  fi
-  if [ -z "${TOKEN_ENCRYPTION_KEY}" ]; then
-    TOKEN_ENCRYPTION_KEY="$(openssl rand -base64 32)"
-  fi
-  kubectl -n "${NAMESPACE}" create secret generic asp-auth \
-    --from-literal=AWX_CLIENT_SECRET="${AWX_CLIENT_SECRET}" \
-    --from-literal=AWX_REDIRECT_URI="${AWX_REDIRECT_URI}" \
-    --from-literal=TOKEN_ENCRYPTION_KEY="${TOKEN_ENCRYPTION_KEY}" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  ok "SSO AWX configuré"
-  if [ -n "${AWX_REDIRECT_URI}" ]; then
-    log "URL de redirection à déclarer dans l'application OAuth2 AWX : ${AWX_REDIRECT_URI}"
-  fi
-else
-  warn "AWX_CLIENT_SECRET absent : le SSO AWX restera désactivé"
+# SSO Ascender et clé de chiffrement des jetons : fournie, sinon reprise du
+# secret existant, sinon générée.
+log "Mise à jour du secret asp-auth (SSO Ascender, chiffrement)"
+if [ -z "${TOKEN_ENCRYPTION_KEY:-}" ]; then
+  TOKEN_ENCRYPTION_KEY="$(kubectl -n "${NAMESPACE}" get secret asp-auth \
+    -o jsonpath='{.data.TOKEN_ENCRYPTION_KEY}' 2>/dev/null | base64 -d 2>/dev/null || true)"
 fi
+if [ -z "${TOKEN_ENCRYPTION_KEY}" ]; then
+  TOKEN_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+  ok "Clé de chiffrement générée (secret asp-auth)"
+fi
+kubectl -n "${NAMESPACE}" create secret generic asp-auth \
+  --from-literal=AWX_CLIENT_SECRET="${AWX_CLIENT_SECRET}" \
+  --from-literal=AWX_REDIRECT_URI="${AWX_REDIRECT_URI}" \
+  --from-literal=TOKEN_ENCRYPTION_KEY="${TOKEN_ENCRYPTION_KEY}" \
+  --from-literal=TOKEN_ENCRYPTION_KEYS_PREVIOUS="${TOKEN_ENCRYPTION_KEYS_PREVIOUS}" \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+ok "SSO Ascender configuré — URL de redirection à déclarer dans Ascender : ${AWX_REDIRECT_URI}"
 
-if [ "${AUTH_MODE}" = "awx" ] && { [ -z "${AWX_BASE_URL}" ] || [ -z "${AWX_CLIENT_ID}" ] || [ -z "${AWX_CLIENT_SECRET}" ]; }; then
-  warn "AUTH_MODE=awx mais la configuration Ascender est incomplète : le portail restera fermé (503)"
-fi
+# PostgreSQL en TLS : autorité interne (10 ans) et certificat serveur (2 ans)
+# pour le nom « postgres ». Conservés d'un déploiement à l'autre, renouvelés
+# 30 jours avant expiration ; la clé de l'autorité reste dans le secret pour
+# re-signer sans changer la confiance de l'API.
+PG_TLS_RENEWED=false
+ensure_pg_tls() {
+  local dir="${RENDER_DIR}/pg-tls"
+  mkdir -p "${dir}"
+  if kubectl -n "${NAMESPACE}" get secret asp-pg-tls >/dev/null 2>&1; then
+    for key in ca.crt ca.key tls.crt; do
+      kubectl -n "${NAMESPACE}" get secret asp-pg-tls -o "jsonpath={.data.${key//./\\.}}" | base64 -d > "${dir}/${key}"
+    done
+    if openssl x509 -checkend $((30 * 24 * 3600)) -noout -in "${dir}/tls.crt" >/dev/null 2>&1; then
+      log "Certificat TLS PostgreSQL valide (expire le $(openssl x509 -enddate -noout -in "${dir}/tls.crt" | cut -d= -f2))"
+      return
+    fi
+    warn "Certificat TLS PostgreSQL proche de l'expiration : renouvellement"
+  else
+    log "Création de l'autorité interne PostgreSQL"
+    MSYS_NO_PATHCONV=1 openssl req -x509 -new -nodes -newkey rsa:3072 -sha256 -days 3650 \
+      -subj "/CN=asp-portal PostgreSQL CA" -keyout "${dir}/ca.key" -out "${dir}/ca.crt" >/dev/null 2>&1
+  fi
+  MSYS_NO_PATHCONV=1 openssl req -new -nodes -newkey rsa:3072 -sha256 -subj "/CN=postgres" \
+    -keyout "${dir}/tls.key" -out "${dir}/tls.csr" >/dev/null 2>&1
+  printf 'subjectAltName=DNS:postgres,DNS:postgres.%s.svc,DNS:postgres.%s.svc.cluster.local\nextendedKeyUsage=serverAuth\nkeyUsage=digitalSignature,keyEncipherment\n' \
+    "${NAMESPACE}" "${NAMESPACE}" > "${dir}/ext.cnf"
+  openssl x509 -req -in "${dir}/tls.csr" -CA "${dir}/ca.crt" -CAkey "${dir}/ca.key" -CAcreateserial \
+    -sha256 -days 730 -extfile "${dir}/ext.cnf" -out "${dir}/tls.crt" >/dev/null 2>&1
+  kubectl -n "${NAMESPACE}" create secret generic asp-pg-tls \
+    --from-file=ca.crt="${dir}/ca.crt" --from-file=ca.key="${dir}/ca.key" \
+    --from-file=tls.crt="${dir}/tls.crt" --from-file=tls.key="${dir}/tls.key" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  PG_TLS_RENEWED=true
+  ok "Certificat TLS PostgreSQL émis (valable 2 ans)"
+}
+ensure_pg_tls
 
 log "Injection du schéma, du jeu de données et du script de migration dans la ConfigMap asp-db-init"
 kubectl -n "${NAMESPACE}" create configmap asp-db-init \
@@ -292,10 +387,37 @@ kubectl -n "${NAMESPACE}" create configmap asp-db-init \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 # ---------------------------------------------------------------------------
+# Rendu des manifestes (images épinglées, domaine, réseau)
+# ---------------------------------------------------------------------------
+log "Rendu des manifestes (images + domaine + réseau)"
+cp "${ROOT_DIR}"/deploy/k8s/*.yaml "${RENDER_DIR}/"
+sed -i.bak "s|IMAGE_API|${API_IMAGE}|g" "${RENDER_DIR}/20-api.yaml"
+sed -i.bak "s|IMAGE_WEB|${WEB_IMAGE}|g" "${RENDER_DIR}/30-web.yaml"
+sed -i.bak "s|IMAGE_POSTGRES|${POSTGRES_IMAGE}|g; s|IMAGE_BUSYBOX|${BUSYBOX_IMAGE}|g" \
+  "${RENDER_DIR}/10-postgres.yaml" "${RENDER_DIR}/15-migrate-job.yaml" "${RENDER_DIR}/20-api.yaml"
+sed -i.bak "s|INGRESS_NAMESPACE|${INGRESS_NAMESPACE}|g; s|API_EGRESS_CIDR|${API_EGRESS_CIDR}|g" \
+  "${RENDER_DIR}/40-network-policies.yaml"
+if [ -n "${DOMAIN}" ]; then
+  sed -i.bak "s|DOMAIN_PLACEHOLDER|${DOMAIN}|g" "${RENDER_DIR}/50-ingress.yaml"
+  if [ "${TLS_MODE}" = "issuer" ] || [ "${TLS_MODE}" = "letsencrypt" ]; then
+    sed -i.bak "s|    # TLS_ISSUER_ANNOTATION|    cert-manager.io/cluster-issuer: ${CERT_MANAGER_ISSUER}|" "${RENDER_DIR}/50-ingress.yaml"
+  else
+    sed -i.bak "/# TLS_ISSUER_ANNOTATION/d" "${RENDER_DIR}/50-ingress.yaml"
+  fi
+fi
+rm -f "${RENDER_DIR}"/*.bak
+
+log "Cloisonnement réseau (NetworkPolicy : tout refusé sauf les flux du portail)"
+kubectl apply -f "${RENDER_DIR}/40-network-policies.yaml" >/dev/null
+
+# ---------------------------------------------------------------------------
 # 4. PostgreSQL
 # ---------------------------------------------------------------------------
-log "Déploiement de PostgreSQL"
-kubectl apply -f "${ROOT_DIR}/deploy/k8s/10-postgres.yaml"
+log "Déploiement de PostgreSQL (TLS obligatoire)"
+kubectl apply -f "${RENDER_DIR}/10-postgres.yaml"
+if [ "${PG_TLS_RENEWED}" = true ]; then
+  kubectl -n "${NAMESPACE}" rollout restart statefulset/postgres >/dev/null
+fi
 
 kubectl -n "${NAMESPACE}" rollout status statefulset/postgres --timeout=300s
 
@@ -327,7 +449,7 @@ fi
 # ---------------------------------------------------------------------------
 log "Migration SQL (Job automatique : schéma au premier démarrage, puis incréments)"
 kubectl -n "${NAMESPACE}" delete job asp-db-migrate --ignore-not-found >/dev/null 2>&1 || true
-kubectl apply -f "${ROOT_DIR}/deploy/k8s/15-migrate-job.yaml"
+kubectl apply -f "${RENDER_DIR}/15-migrate-job.yaml"
 if kubectl -n "${NAMESPACE}" wait --for=condition=complete job/asp-db-migrate --timeout=300s; then
   kubectl -n "${NAMESPACE}" logs job/asp-db-migrate --tail=40 || true
   ok "Schéma de base à jour"
@@ -339,24 +461,24 @@ fi
 # ---------------------------------------------------------------------------
 # 5. API + frontend
 # ---------------------------------------------------------------------------
-log "Rendu des manifestes (images + domaine)"
-cp "${ROOT_DIR}"/deploy/k8s/*.yaml "${RENDER_DIR}/"
-sed -i.bak "s|IMAGE_API|${API_IMAGE}|g" "${RENDER_DIR}/20-api.yaml"
-sed -i.bak "s|IMAGE_WEB|${WEB_IMAGE}|g" "${RENDER_DIR}/30-web.yaml"
-if [ -n "${DOMAIN}" ]; then
-  sed -i.bak "s|DOMAIN_PLACEHOLDER|${DOMAIN}|g" "${RENDER_DIR}/50-ingress.yaml"
-  if [ "${TLS_MODE}" = "issuer" ] || [ "${TLS_MODE}" = "letsencrypt" ]; then
-    sed -i.bak "s|    # TLS_ISSUER_ANNOTATION|    cert-manager.io/cluster-issuer: ${CERT_MANAGER_ISSUER}|" "${RENDER_DIR}/50-ingress.yaml"
-  else
-    sed -i.bak "/# TLS_ISSUER_ANNOTATION/d" "${RENDER_DIR}/50-ingress.yaml"
-  fi
-fi
-rm -f "${RENDER_DIR}"/*.bak
-
 log "Déploiement de l'API"
-kubectl apply -f "${RENDER_DIR}/05-config.yaml"
 kubectl apply -f "${RENDER_DIR}/20-api.yaml"
-kubectl -n "${NAMESPACE}" rollout status deployment/asp-api --timeout=240s
+if [ "${PG_TLS_RENEWED}" = true ]; then
+  kubectl -n "${NAMESPACE}" rollout restart deployment/asp-api >/dev/null
+fi
+if ! kubectl -n "${NAMESPACE}" rollout status deployment/asp-api --timeout=240s; then
+  kubectl -n "${NAMESPACE}" logs deploy/asp-api --tail=30 || true
+  fail "L'API ne démarre pas (configuration de sécurité refusée ? voir les journaux ci-dessus)"
+fi
+
+# Rotation de clé : les données encore chiffrées avec une ancienne clé sont
+# re-chiffrées avec la clé courante.
+if [ -n "${TOKEN_ENCRYPTION_KEYS_PREVIOUS}" ]; then
+  log "Rotation de clé : re-chiffrement des données"
+  kubectl -n "${NAMESPACE}" exec deploy/asp-api -- node scripts/rotate-keys.js \
+    || fail "Rotation de clé échouée"
+  ok "Données re-chiffrées : retire TOKEN_ENCRYPTION_KEYS_PREVIOUS au prochain déploiement"
+fi
 
 log "Déploiement du portail"
 kubectl apply -f "${RENDER_DIR}/30-web.yaml"
@@ -391,7 +513,7 @@ spec:
     solvers:
       - http01:
           ingress:
-            ingressClassName: nginx
+            ingressClassName: traefik
 YAML
       ;;
   esac
@@ -423,8 +545,19 @@ fi
 # 7. Vérifications et résumé
 # ---------------------------------------------------------------------------
 log "Contrôle de santé de l'API"
+# Pod conforme au profil « restricted » du namespace, autorisé par la
+# NetworkPolicy healthcheck-egress à joindre l'API seulement.
+HEALTH_OVERRIDES="$(cat <<JSON
+{"spec":{"automountServiceAccountToken":false,
+ "securityContext":{"runAsNonRoot":true,"runAsUser":65534,"seccompProfile":{"type":"RuntimeDefault"}},
+ "containers":[{"name":"health","image":"${BUSYBOX_IMAGE}","stdin":true,
+  "command":["wget","-qO-","http://asp-api/api/system/health"],
+  "securityContext":{"allowPrivilegeEscalation":false,"readOnlyRootFilesystem":true,"capabilities":{"drop":["ALL"]}}}]}}
+JSON
+)"
 kubectl -n "${NAMESPACE}" run "health-$(date +%s)" --rm -i --restart=Never \
-  --image=busybox:1.36 --quiet -- sh -c 'wget -qO- http://asp-api/api/system/health' >/dev/null 2>&1 \
+  --labels=app.kubernetes.io/name=asp-healthcheck --image="${BUSYBOX_IMAGE}" \
+  --overrides="${HEALTH_OVERRIDES}" --quiet >/dev/null 2>&1 \
   && ok "L'API répond sur /api/system/health" \
   || warn "Le test interne a échoué : vérifie les logs avec kubectl -n ${NAMESPACE} logs deploy/asp-api"
 

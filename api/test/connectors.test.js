@@ -10,6 +10,9 @@ let base;
 
 test.before(async () => {
   stack = await startStack();
+  await stack.db.query(
+    "INSERT INTO connectors (id, kind, name, endpoint, endpoint_default, configured) VALUES ('cn-jen-02', 'jenkins', 'Jenkins Build Service', '—', '—', true)",
+  );
   admin = await stack.login('admin');
   // Faux Jenkins : /ok -> 200, /auth -> 401, /fail -> 503.
   target = http.createServer((req, res) => {

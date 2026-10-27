@@ -1,14 +1,26 @@
+const fs = require('fs');
 const { Pool } = require('pg');
+
+/**
+ * PG_SSL=true : connexion chiffrée, certificat vérifié. PG_SSL_CA_FILE désigne
+ * l'autorité interne qui signe le certificat du serveur PostgreSQL.
+ * PG_SSL_REJECT_UNAUTHORIZED=false (sans vérification) est refusé en production.
+ */
+const sslOptions = () => {
+  if (process.env.PG_SSL !== 'true') return false;
+  const caFile = String(process.env.PG_SSL_CA_FILE || '').trim();
+  return {
+    rejectUnauthorized: process.env.PG_SSL_REJECT_UNAUTHORIZED !== 'false',
+    ...(caFile ? { ca: fs.readFileSync(caFile, 'utf8') } : {}),
+  };
+};
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: Number(process.env.PG_POOL_MAX || 10),
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
-  // PG_SSL=true : certificat vérifié, sauf PG_SSL_REJECT_UNAUTHORIZED=false (certificat auto-signé).
-  ssl: process.env.PG_SSL === 'true'
-    ? { rejectUnauthorized: process.env.PG_SSL_REJECT_UNAUTHORIZED !== 'false' }
-    : false,
+  ssl: sslOptions(),
 });
 
 pool.on('error', (err) => {

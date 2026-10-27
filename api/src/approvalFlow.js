@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { q } = require('./db');
 const awxJobs = require('./awxJobs');
+const { isWired } = require('./engines');
 const { latestSessionForUser, sessionUser } = require('./auth');
 
 /**
@@ -155,6 +156,8 @@ const launchAfterApproval = async (requestId) => {
   const { rows } = await q('SELECT * FROM requests WHERE id = $1', [requestId]);
   const request = rows[0];
   if (!request || request.awx_job_id) return { skipped: 'already_launched' };
+  // Moteur non branché (Jenkins, Terraform…) : rien à lancer pour l'instant.
+  if (request.connector_kind && !isWired(request.connector_kind)) return { skipped: 'engine_not_wired' };
 
   const session = await latestSessionForUser(request.user_id);
   if (!session) {

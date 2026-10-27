@@ -13,6 +13,7 @@ const ERROR_KEYS: Record<string, string> = {
   invalid_state: 'auth_login_error_state',
   exchange_failed: 'auth_login_error_exchange',
   awx_unreachable: 'auth_login_error_unreachable',
+  session_expired: 'auth_login_error_session_expired',
 };
 
 const FEATURES = [

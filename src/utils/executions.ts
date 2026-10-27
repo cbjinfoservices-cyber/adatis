@@ -36,6 +36,8 @@ export interface RequestItem {
   approval: string;
   approvalState: string;
   awaitingRequester?: boolean;
+  /** Moteur (type de connecteur) retenu à la commande. */
+  engine?: { kind: string; connectorId: string | null; connectorName: string };
   businessType: string;
   awx?: AwxJob | null;
 }

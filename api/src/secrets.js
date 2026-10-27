@@ -1,15 +1,27 @@
 const crypto = require('crypto');
 
 /**
- * Chiffrement des jetons Ascender stockés en base (AES-256-GCM).
+ * Chiffrement des jetons Ascender et des champs secrets stockés en base
+ * (AES-256-GCM).
  *
- * Clé : TOKEN_ENCRYPTION_KEY (32 octets en base64 ou hexadécimal). À défaut,
- * clé dérivée (HKDF) de AWX_CLIENT_SECRET, toujours présent quand le SSO est
- * actif. Format stocké : « v1:<iv>:<tag>:<chiffré> » en base64.
- * Une valeur sans préfixe v1: est un jeton historique en clair : relue telle quelle.
+ * Trousseau :
+ *   TOKEN_ENCRYPTION_KEY            clé courante (32 octets en base64 ou hexadécimal),
+ *                                   utilisée pour tout nouveau chiffrement ;
+ *   TOKEN_ENCRYPTION_KEYS_PREVIOUS  anciennes clés, séparées par des virgules,
+ *                                   seulement pour relire (rotation).
+ *
+ * Format stocké : « v2:<kid>:<iv>:<tag>:<chiffré> », kid = empreinte de la clé.
+ * Le format « v1:<iv>:<tag>:<chiffré> » (sans kid) reste lisible.
+ *
+ * En production, la clé courante est obligatoire (contrôle au démarrage) et
+ * une valeur stockée en clair n'est jamais relue. Hors production seulement,
+ * une clé est dérivée (HKDF) de AWX_CLIENT_SECRET à défaut de clé explicite.
  */
 
-const PREFIX = 'v1:';
+const V1 = 'v1:';
+const V2 = 'v2:';
+
+const isProduction = () => process.env.NODE_ENV === 'production';
 
 const decodeKey = (raw) => {
   const value = String(raw || '').trim();
@@ -18,13 +30,41 @@ const decodeKey = (raw) => {
   return buffer.length === 32 ? buffer : null;
 };
 
-const currentKey = () => {
-  const explicit = decodeKey(process.env.TOKEN_ENCRYPTION_KEY);
-  if (explicit) return explicit;
+const keyId = (key) => crypto.createHash('sha256').update(key).digest('hex').slice(0, 8);
+
+/** Ancienne clé de repli, dérivée du secret OAuth : lecture des valeurs v1 uniquement. */
+const derivedKey = () => {
   const secret = String(process.env.AWX_CLIENT_SECRET || '');
   if (!secret) return null;
   return Buffer.from(crypto.hkdfSync('sha256', secret, 'asp-portal', 'token-encryption', 32));
 };
+
+/** Clé courante : explicite, ou dérivée hors production. */
+const currentKey = () => {
+  const explicit = decodeKey(process.env.TOKEN_ENCRYPTION_KEY);
+  if (explicit) return explicit;
+  return isProduction() ? null : derivedKey();
+};
+
+const previousKeys = () => String(process.env.TOKEN_ENCRYPTION_KEYS_PREVIOUS || '')
+  .split(',')
+  .map(decodeKey)
+  .filter(Boolean);
+
+/** Toutes les clés capables de relire une valeur, la courante en premier. */
+const readableKeys = () => {
+  const keys = [currentKey(), ...previousKeys(), derivedKey()].filter(Boolean);
+  const seen = new Set();
+  return keys.filter((key) => {
+    const id = keyId(key);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+};
+
+/** Vrai si TOKEN_ENCRYPTION_KEY est présente et fait 32 octets. */
+const explicitKeyConfigured = () => Boolean(decodeKey(process.env.TOKEN_ENCRYPTION_KEY));
 
 const encrypt = (plain) => {
   const text = String(plain || '');
@@ -33,23 +73,43 @@ const encrypt = (plain) => {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const data = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
-  return `${PREFIX}${iv.toString('base64')}:${cipher.getAuthTag().toString('base64')}:${data.toString('base64')}`;
+  return `${V2}${keyId(key)}:${iv.toString('base64')}:${cipher.getAuthTag().toString('base64')}:${data.toString('base64')}`;
 };
 
-/** Renvoie le jeton en clair, ou '' si la clé ne permet pas de le lire. */
+const openWith = (key, [iv, tag, data]) => {
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'));
+  decipher.setAuthTag(Buffer.from(tag, 'base64'));
+  return Buffer.concat([decipher.update(Buffer.from(data, 'base64')), decipher.final()]).toString('utf8');
+};
+
+/** Renvoie la valeur en clair, ou '' si aucune clé du trousseau ne permet de la lire. */
 const decrypt = (stored) => {
   const text = String(stored || '');
-  if (!text.startsWith(PREFIX)) return text;
-  const key = currentKey();
-  if (!key) return '';
-  try {
-    const [iv, tag, data] = text.slice(PREFIX.length).split(':').map((part) => Buffer.from(part, 'base64'));
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAuthTag(tag);
-    return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
-  } catch {
+  if (!text) return '';
+  if (text.startsWith(V2)) {
+    const [kid, ...parts] = text.slice(V2.length).split(':');
+    const key = readableKeys().find((candidate) => keyId(candidate) === kid);
+    if (!key) return '';
+    try { return openWith(key, parts); } catch { return ''; }
+  }
+  if (text.startsWith(V1)) {
+    const parts = text.slice(V1.length).split(':');
+    for (const key of readableKeys()) {
+      try { return openWith(key, parts); } catch { /* clé suivante */ }
+    }
     return '';
   }
+  // Valeur historique en clair : jamais relue en production.
+  return isProduction() ? '' : text;
+};
+
+/** Vrai si la valeur n'est pas chiffrée avec la clé courante (à re-chiffrer). */
+const needsRotation = (stored) => {
+  const text = String(stored || '');
+  if (!text) return false;
+  const key = currentKey();
+  if (!key) return false;
+  return !text.startsWith(`${V2}${keyId(key)}:`);
 };
 
 /* --- Champs secrets des formulaires (type « password ») ------------------ */
@@ -81,6 +141,26 @@ const revealSecrets = (payload) => {
   )));
 };
 
+/** Re-chiffre avec la clé courante les champs secrets d'un payload. Renvoie null si rien ne change. */
+const resealPayload = (payload) => {
+  if (!payload || typeof payload !== 'object') return null;
+  let changed = false;
+  const out = Object.fromEntries(Object.entries(payload).map(([name, value]) => {
+    if (!isSealed(value) || !needsRotation(value[SECRET_MARK])) return [name, value];
+    const plain = decrypt(value[SECRET_MARK]);
+    if (!plain) return [name, value];
+    changed = true;
+    return [name, { [SECRET_MARK]: encrypt(plain) }];
+  }));
+  return changed ? out : null;
+};
+
 module.exports = {
-  encrypt, decrypt, sealSecrets, revealSecrets,
+  encrypt,
+  decrypt,
+  needsRotation,
+  explicitKeyConfigured,
+  sealSecrets,
+  revealSecrets,
+  resealPayload,
 };

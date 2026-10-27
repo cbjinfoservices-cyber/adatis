@@ -11,6 +11,8 @@ import SystemMigrationsTable from '@/pages/admin/system/components/SystemMigrati
 import SystemAvailability from '@/pages/admin/system/components/SystemAvailability';
 import SystemSettingsCard from '@/pages/admin/system/components/SystemSettingsCard';
 import SystemAlertsCard from '@/pages/admin/system/components/SystemAlertsCard';
+import SystemAuditCard from '@/pages/admin/system/components/SystemAuditCard';
+import { useAuth } from '@/hooks/useAuth';
 import { ApiError } from '@/utils/api';
 import { fetchSystemInfo, type SystemInfo, type SystemSettings } from '@/utils/system';
 import { buildDiagnostic, copyToClipboard, migrationsCsvFileName, migrationsToCsv } from '@/utils/systemDiagnostic';
@@ -19,6 +21,9 @@ import { downloadCsv } from '@/utils/connectors';
 export default function SystemPage() {
   const { t, i18n } = useTranslation();
   const readOnly = useReadOnly();
+  const { mode, user } = useAuth();
+  // Journal d'audit : administrateurs uniquement (l'API refuse les autres rôles).
+  const canReadAudit = mode === 'disabled' || user?.role === 'admin';
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -163,6 +168,7 @@ export default function SystemPage() {
                 onExport={exportMigrations}
               />
             </div>
+            {canReadAudit && <SystemAuditCard />}
           </>
         ) : null}
       </div>

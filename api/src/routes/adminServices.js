@@ -2,6 +2,7 @@ const express = require('express');
 const { q } = require('../db');
 const awx = require('../awx');
 const awxRbac = require('../awxRbac');
+const { isWired } = require('../engines');
 const { authMode, ensureAccessToken } = require('../auth');
 
 /**
@@ -18,10 +19,22 @@ const router = express.Router();
 const SERVICE_SELECT = `
   SELECT s.id, s.name_fr, s.name_en, s.icon, s.category_id, s.approval,
          s.awx_job_template_id, s.awx_job_template_name,
-         s.awx_workflow_job_template_id, s.awx_workflow_job_template_name
+         s.awx_workflow_job_template_id, s.awx_workflow_job_template_name,
+         s.connector_id, c.kind AS connector_kind, c.name AS connector_name
     FROM services s
+    LEFT JOIN connectors c ON c.id = s.connector_id
    ORDER BY s.name_fr
 `;
+
+const serviceById = async (id) => {
+  const { rows } = await q(SERVICE_SELECT.replace('ORDER BY s.name_fr', 'WHERE s.id = $1'), [id]);
+  return rows[0] ? toService(rows[0]) : null;
+};
+
+const ascenderConnectorId = async () => {
+  const { rows } = await q("SELECT id FROM connectors WHERE kind = 'ascender' ORDER BY id LIMIT 1");
+  return rows[0]?.id || null;
+};
 
 const toService = (row) => {
   const workflowId = Number(row.awx_workflow_job_template_id) || null;
@@ -49,6 +62,10 @@ const toService = (row) => {
     templateName,
     jobTemplateId: jobId,
     workflowTemplateId: workflowId,
+    // Moteur qui exécute le service (connecteur).
+    connector: row.connector_id
+      ? { id: row.connector_id, kind: row.connector_kind, name: row.connector_name }
+      : null,
   };
 };
 
@@ -67,8 +84,48 @@ const awxSession = async (req) => {
 
 router.get('/admin/services', async (_req, res, next) => {
   try {
-    res.json({ items: await loadServices() });
+    const connectors = await q(
+      'SELECT id, name, kind, managed FROM connectors ORDER BY managed DESC, name',
+    );
+    res.json({
+      items: await loadServices(),
+      connectors: connectors.rows.map((row) => ({
+        id: row.id, name: row.name, kind: row.kind, wired: isWired(row.kind),
+      })),
+    });
   } catch (err) { next(err); }
+});
+
+/**
+ * Moteur d'un service. body: { connectorId: string | null }
+ * Hors Ascender, le modèle Ascender affecté est retiré (il ne servirait plus).
+ */
+router.patch('/admin/services/:id/connector', async (req, res, next) => {
+  try {
+    const connectorId = req.body?.connectorId || null;
+    const current = await q('SELECT id FROM services WHERE id = $1', [req.params.id]);
+    if (!current.rows.length) return res.status(404).json({ error: 'service_not_found' });
+
+    let kind = null;
+    if (connectorId) {
+      const connector = await q('SELECT kind FROM connectors WHERE id = $1', [connectorId]);
+      if (!connector.rows.length) return res.status(404).json({ error: 'connector_not_found' });
+      kind = connector.rows[0].kind;
+    }
+
+    await q(
+      `UPDATE services
+          SET connector_id = $2,
+              awx_job_template_id = CASE WHEN $3 THEN awx_job_template_id ELSE NULL END,
+              awx_job_template_name = CASE WHEN $3 THEN awx_job_template_name ELSE '' END,
+              awx_workflow_job_template_id = CASE WHEN $3 THEN awx_workflow_job_template_id ELSE NULL END,
+              awx_workflow_job_template_name = CASE WHEN $3 THEN awx_workflow_job_template_name ELSE '' END
+        WHERE id = $1`,
+      [req.params.id, connectorId, !connectorId || kind === 'ascender'],
+    );
+    awxRbac.forget(req.auth?.session);
+    return res.json(await serviceById(req.params.id));
+  } catch (err) { return next(err); }
 });
 
 /** Modèles AWX accessibles au jeton de l'utilisateur. */
@@ -140,15 +197,18 @@ router.patch('/admin/services/:id', async (req, res, next) => {
     const model = list.find((item) => Number(item.id) === id);
     if (!model) return res.status(403).json({ error: 'template_forbidden' });
 
+    // Un modèle Ascender rattache le service au connecteur Ascender.
+    const ascenderId = await ascenderConnectorId();
     if (kind === 'job') {
       await q(
         `UPDATE services
             SET awx_job_template_id = $2,
                 awx_job_template_name = $3,
                 awx_workflow_job_template_id = NULL,
-                awx_workflow_job_template_name = ''
+                awx_workflow_job_template_name = '',
+                connector_id = COALESCE($4, connector_id)
           WHERE id = $1`,
-        [req.params.id, id, String(model.name || '').slice(0, 200)],
+        [req.params.id, id, String(model.name || '').slice(0, 200), ascenderId],
       );
     } else {
       await q(
@@ -156,9 +216,10 @@ router.patch('/admin/services/:id', async (req, res, next) => {
             SET awx_workflow_job_template_id = $2,
                 awx_workflow_job_template_name = $3,
                 awx_job_template_id = NULL,
-                awx_job_template_name = ''
+                awx_job_template_name = '',
+                connector_id = COALESCE($4, connector_id)
           WHERE id = $1`,
-        [req.params.id, id, String(model.name || '').slice(0, 200)],
+        [req.params.id, id, String(model.name || '').slice(0, 200), ascenderId],
       );
     }
 

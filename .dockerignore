@@ -3,7 +3,20 @@ out
 dist
 .git
 .gitignore
+.github
 *.log
 api
 db
+deploy
+# Configuration nginx de l'image frontend (Dockerfile).
+!deploy/nginx.conf
+docs
 screenshots
+e2e-output
+# Données et secrets locaux : jamais dans un contexte de build.
+.pgdata*
+.certs
+.env*
+*.pem
+*.key
+config.env

@@ -52,8 +52,6 @@ export default function ServicePage() {
       const created = await api.post<RequestItem & { awxLaunch?: AwxLaunchResult }>('/requests', {
         serviceId: service.id,
         environment,
-        userId: 'u-camille',
-        tenantId: 'acme',
         payload: v,
       });
       setLaunch(created.awxLaunch ?? null);

@@ -6,6 +6,9 @@ dist/
 .env.*
 auto-imports.d.ts
 *.tsbuildinfo
-.pgdata/
+.pgdata*/
 e2e-output/
 .certs/
+deploy/package/config.env
+config.env
+.env*

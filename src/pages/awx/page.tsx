@@ -12,7 +12,7 @@ import {
 const POLL_MS = 10000;
 
 const EMPTY_STATS: AwxJobsStats = {
-  total: 0, active: 0, success: 0, failed: 0,
+  total: 0, active: 0, success: 0, failed: 0, notWired: 0,
 };
 
 export default function AwxTrackingPage() {

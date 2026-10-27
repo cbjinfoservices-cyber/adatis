@@ -70,7 +70,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }, [i18n.language]);
 
   if (authMode !== 'disabled' && !authLoading && !me?.authenticated) {
-    return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}` }} />;
+    return (
+      <Navigate
+        to={me?.expired ? '/login?auth_error=session_expired' : '/login'}
+        replace
+        state={{ from: `${location.pathname}${location.search}` }}
+      />
+    );
   }
 
   const showAdmin = authMode === 'disabled' || permissions.canViewAdmin || permissions.canAdmin || permissions.canApprove;
