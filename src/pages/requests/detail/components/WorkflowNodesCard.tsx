@@ -8,13 +8,16 @@ type Props = {
   jobUrl: string;
   active: boolean;
   refreshKey: number;
+  /** Nœud dont la sortie est affichée. */
+  selectedJobId: number | null;
+  onShowOutput: (jobId: number) => void;
 };
 
 const ACTIVE_NODE = ['new', 'pending', 'waiting', 'running'];
 
 /** Étapes d'un workflow AWX : un nœud par étape, avec son statut réel. */
 export default function WorkflowNodesCard({
-  requestId, jobUrl, active, refreshKey,
+  requestId, jobUrl, active, refreshKey, selectedJobId, onShowOutput,
 }: Props) {
   const { t, i18n } = useTranslation();
   const [nodes, setNodes] = useState<AwxWorkflowNode[]>([]);
@@ -126,6 +129,18 @@ export default function WorkflowNodesCard({
                   <i className={isRunning ? 'ri-loader-4-line animate-spin' : 'ri-circle-fill text-[6px]'} aria-hidden="true" />
                   {t(`awx_status_${status}`, { defaultValue: status || t('awx_wf_pending') })}
                 </span>
+                {node.jobId && node.type === 'job' && (
+                  <button
+                    type="button"
+                    onClick={() => onShowOutput(node.jobId as number)}
+                    aria-pressed={selectedJobId === node.jobId}
+                    title={t('out_show')}
+                    aria-label={t('out_show')}
+                    className={`w-6 h-6 flex items-center justify-center rounded-md cursor-pointer ${selectedJobId === node.jobId ? 'bg-foreground-950 text-background-50' : 'text-foreground-500 hover:bg-background-200 hover:text-foreground-900'}`}
+                  >
+                    <i className="ri-terminal-box-line text-xs" aria-hidden="true" />
+                  </button>
+                )}
                 {node.jobUrl && (
                   <a
                     href={node.jobUrl}

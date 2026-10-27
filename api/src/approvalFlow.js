@@ -143,7 +143,11 @@ const LAUNCH_SELECT = `
 
 /** Demande approuvée mais impossible à lancer au nom du demandeur : il la lancera lui-même. */
 const awaitRequester = async (requestId) => {
-  await q("UPDATE requests SET awx_status = 'awaiting_requester' WHERE id = $1 AND awx_job_id IS NULL", [requestId])
+  // Pas un échec : la demande reste en file jusqu'au lancement par le demandeur.
+  await q(
+    "UPDATE requests SET awx_status = 'awaiting_requester', status = 'queued' WHERE id = $1 AND awx_job_id IS NULL",
+    [requestId],
+  )
     .catch(() => {});
 };
 

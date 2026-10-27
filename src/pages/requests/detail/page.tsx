@@ -1,69 +1,74 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import AppShell from '@/components/feature/AppShell';
 import ExecutionTimeline from '@/pages/requests/detail/components/ExecutionTimeline';
-import ExecutionLogs from '@/pages/requests/detail/components/ExecutionLogs';
+import JobOutput from '@/pages/requests/detail/components/JobOutput';
 import AwxJobCard from '@/pages/requests/detail/components/AwxJobCard';
 import WorkflowNodesCard from '@/pages/requests/detail/components/WorkflowNodesCard';
 import { ResultCard, ErrorCard } from '@/pages/requests/detail/components/ResultPanels';
 import { tx, localeOf } from '@/utils/catalog';
 import {
-  STATUS_STYLE, businessLabel, formatDate, formatDuration, LIVE_LOG_TEMPLATES,
-  type ExecutionStatus, type LogLine, type TimelineStep, type RequestItem, type RequestDetailData, type AwxJob,
+  ACTIVE_AWX, STATUS_STYLE, businessLabel, formatDate, formatDuration,
+  type RequestItem, type RequestDetailData,
 } from '@/utils/executions';
 import { api, ApiError } from '@/utils/api';
+import { cancelRequestJob, launchRequestJob } from '@/utils/awxJobs';
 import { loadStore, useStore } from '@/utils/store';
 import { ErrorBlock, LoadingBlock } from '@/components/base/DataState';
 import { exportExecutionPdf } from '@/utils/pdf';
 
-const nowTime = () => new Date().toLocaleTimeString('fr-FR', { hour12: false });
-
-const ACTIVE_AWX = ['new', 'pending', 'waiting', 'running', 'queued'];
+/** Relecture de la demande tant que son job tourne (l'API lit la base, tenue à jour en fond). */
+const POLL_MS = 5000;
 
 type AwxBlocked = 'no_template' | 'auth_disabled' | 'no_token' | 'no_session' | 'rbac_forbidden'
   | 'approval_pending' | 'approval_rejected' | null;
+
+const BLOCK_CODES = ['no_template', 'awx_disabled', 'no_token', 'no_session', 'rbac_forbidden', 'approval_pending', 'approval_rejected'];
+
+type RequestData = RequestItem & RequestDetailData;
+
+const errorPayload = (err: unknown) => (
+  err instanceof ApiError ? (err.detail as { error?: string; message?: string } | undefined) || null : null
+);
 
 export default function RequestDetailPage() {
   const { id } = useParams();
   const { t, i18n } = useTranslation();
   const { services } = useStore();
-  const [request, setRequest] = useState<RequestItem | null>(null);
-  const [detail, setDetail] = useState<RequestDetailData | null>(null);
+  const [data, setData] = useState<RequestData | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-
-  const [status, setStatus] = useState<ExecutionStatus>('queued');
-  const [progress, setProgress] = useState(0);
-  const [steps, setSteps] = useState<TimelineStep[]>([]);
-  const [logs, setLogs] = useState<LogLine[]>([]);
-  const [paused, setPaused] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [awx, setAwx] = useState<AwxJob | null>(null);
   const [awxLaunching, setAwxLaunching] = useState(false);
   const [awxSyncing, setAwxSyncing] = useState(false);
+  const [awxCanceling, setAwxCanceling] = useState(false);
   const [awxBlocked, setAwxBlocked] = useState<AwxBlocked>(null);
   const [awxError, setAwxError] = useState<string | null>(null);
-  const [awxPulse, setAwxPulse] = useState(0);
-  const templateIndex = useRef(0);
+  const [pulse, setPulse] = useState(0);
+  /** Job dont la sortie est affichée : null = job courant. */
+  const [outputJobId, setOutputJobId] = useState<number | null>(null);
+  const [outputText, setOutputText] = useState('');
+
+  const refresh = useCallback(async () => {
+    const fresh = await api.get<RequestData>(`/requests/${id}`);
+    setData(fresh);
+    setPulse((value) => value + 1);
+    return fresh;
+  }, [id]);
 
   useEffect(() => {
     loadStore();
     let active = true;
     setLoading(true);
     setFailed(false);
+    setOutputJobId(null);
     api
-      .get<RequestItem & RequestDetailData>(`/requests/${id}`)
-      .then((data) => {
+      .get<RequestData>(`/requests/${id}`)
+      .then((fresh) => {
         if (!active) return;
-        setRequest({ ...data });
-        setDetail({ timeline: data.timeline || [], logs: data.logs || [], result: data.result, error: data.error });
-        setStatus(data.status);
-        setProgress(data.progress);
-        setSteps(data.timeline || []);
-        setLogs(data.logs || []);
-        setAwx(data.awx ?? null);
+        setData(fresh);
         setLoading(false);
       })
       .catch(() => {
@@ -74,41 +79,30 @@ export default function RequestDetailPage() {
     return () => { active = false; };
   }, [id]);
 
-  // Un job AWX suit son état réel : la simulation locale est désactivée.
-  const hasAwxJob = Boolean(awx?.jobId);
-  // Job bloqué tant que l'approbation n'est pas accordée (contrôlé aussi par l'API).
-  let approvalBlock: AwxBlocked = null;
-  if (request?.approvalState === 'pending') approvalBlock = 'approval_pending';
-  else if (request?.approvalState === 'rejected') approvalBlock = 'approval_rejected';
-  const awxActive = hasAwxJob && ACTIVE_AWX.includes(String(awx?.status || '').toLowerCase());
-  const isLive = status === 'running' && !paused && !hasAwxJob;
+  const awx = data?.awx ?? null;
+  const awxActive = Boolean(awx?.jobId) && ACTIVE_AWX.includes(String(awx?.status || '').toLowerCase());
 
-  // Rafraîchissement automatique de l'état du job AWX tant qu'il tourne.
+  // L'état du job est synchronisé côté serveur : la page relit simplement la demande.
   useEffect(() => {
     if (!awxActive) return undefined;
-    const timer = window.setInterval(async () => {
-      try {
-        const fresh = await api.post<RequestItem>(`/requests/${id}/awx/sync`);
-        if (fresh.awx) setAwx(fresh.awx);
-        setStatus(fresh.status);
-        setProgress(fresh.progress);
-        setAwxPulse((value) => value + 1);
-      } catch {
-        /* AWX momentanément injoignable : la prochaine passe réessaiera */
-      }
-    }, 8000);
+    const timer = window.setInterval(() => {
+      refresh().catch(() => { /* API momentanément injoignable : prochaine passe */ });
+    }, POLL_MS);
     return () => window.clearInterval(timer);
-  }, [awxActive, id]);
+  }, [awxActive, refresh]);
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = window.setTimeout(() => setToast(null), 4200);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   const syncAwx = async () => {
     setAwxSyncing(true);
     setAwxError(null);
     try {
-      const fresh = await api.post<RequestItem>(`/requests/${id}/awx/sync`);
-      if (fresh.awx) setAwx(fresh.awx);
-      setStatus(fresh.status);
-      setProgress(fresh.progress);
-      setAwxPulse((value) => value + 1);
+      await api.post<RequestItem>(`/requests/${id}/awx/sync`);
+      await refresh();
     } catch {
       setAwxError(t('awx_job_sync_failed'));
     } finally {
@@ -120,58 +114,41 @@ export default function RequestDetailPage() {
     setAwxLaunching(true);
     setAwxError(null);
     try {
-      const fresh = await api.post<RequestItem>(`/requests/${id}/awx/launch`);
-      setAwx(fresh.awx ?? null);
-      setStatus(fresh.status);
-      setProgress(fresh.progress);
+      await launchRequestJob(String(id));
+      setOutputJobId(null);
+      await refresh();
       setToast(t('awx_job_launched'));
     } catch (err) {
-      const payload = err instanceof ApiError ? (err.detail as { error?: string; message?: string }) : null;
+      const payload = errorPayload(err);
       const code = payload?.error || '';
-      if (['no_template', 'awx_disabled', 'no_token', 'no_session', 'rbac_forbidden', 'approval_pending', 'approval_rejected'].includes(code)) {
+      if (BLOCK_CODES.includes(code)) {
         setAwxBlocked(code as Exclude<AwxBlocked, null>);
       } else {
         setAwxError(payload?.message || t('awx_job_launch_failed'));
       }
+      // Un lancement refusé est enregistré sur la demande : on l'affiche.
+      await refresh().catch(() => {});
     } finally {
       setAwxLaunching(false);
     }
   };
 
-  useEffect(() => {
-    if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), 4200);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
-
-  useEffect(() => {
-    if (!isLive) return undefined;
-    const timer = window.setInterval(() => {
-      setProgress((prev) => {
-        const next = Math.min(prev + 5, 100);
-        setSteps((current) => {
-          const runningIdx = current.findIndex((s) => s.status === 'running');
-          const target = Math.min(Math.floor((next / 100) * current.length), current.length - 1);
-          if (runningIdx === -1) return current;
-          return current.map((s, i) => {
-            if (i < target) return s.status === 'success' ? s : { ...s, status: 'success' as const };
-            if (i === target) return s.status === 'running' ? s : { ...s, status: 'running' as const };
-            return s;
-          });
-        });
-        const tpl = LIVE_LOG_TEMPLATES[templateIndex.current % LIVE_LOG_TEMPLATES.length];
-        templateIndex.current += 1;
-        setLogs((l) => [...l, { time: nowTime(), level: tpl.level as LogLine['level'], text: tpl.text }]);
-        if (next >= 100) {
-          setStatus('success');
-          setSteps((cur) => cur.map((s) => ({ ...s, status: 'success' as const })));
-          setLogs((l) => [...l, { time: nowTime(), level: 'success', text: { fr: 'Exécution terminée, service disponible', en: 'Execution finished, service available' } }]);
-        }
-        return next;
-      });
-    }, 2400);
-    return () => window.clearInterval(timer);
-  }, [isLive]);
+  const cancelAwx = async () => {
+    if (!window.confirm(t('awx_job_cancel_confirm'))) return;
+    setAwxCanceling(true);
+    setAwxError(null);
+    try {
+      await cancelRequestJob(String(id));
+      await refresh();
+      setToast(t('awx_job_canceled'));
+    } catch (err) {
+      const code = errorPayload(err)?.error || '';
+      setAwxError(t(code === 'rbac_forbidden' ? 'awx_job_no_rbac' : 'awx_job_cancel_failed'));
+      await refresh().catch(() => {});
+    } finally {
+      setAwxCanceling(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -186,7 +163,7 @@ export default function RequestDetailPage() {
     );
   }
 
-  if (failed || !request || !detail) {
+  if (failed || !data) {
     return (
       <AppShell>
         <div className="px-4 md:px-10 py-8 space-y-4">
@@ -199,21 +176,37 @@ export default function RequestDetailPage() {
     );
   }
 
+  const request = data;
+  const { status, progress } = request;
+  const steps = data.timeline || [];
+  const attempts = data.attempts || [];
   const service = services.find((s) => s.id === request.serviceId);
   const st = STATUS_STYLE[status];
   const lang = i18n.language;
 
-  const retry = () => {
-    setStatus('running');
-    setProgress(8);
-    setSteps(detail.timeline.map((s, i) => ({ ...s, status: i === 0 ? 'success' : i === 1 ? 'running' : 'pending' })));
-    setLogs([{ time: nowTime(), level: 'info', text: { fr: 'Nouvelle tentative lancée', en: 'Retry started' } }]);
-  };
+  // Job bloqué tant que l'approbation n'est pas accordée (contrôlé aussi par l'API).
+  let approvalBlock: AwxBlocked = null;
+  if (request.approvalState === 'pending') approvalBlock = 'approval_pending';
+  else if (request.approvalState === 'rejected') approvalBlock = 'approval_rejected';
+  const hasAwxJob = Boolean(awx?.jobId);
+  const canRelaunch = hasAwxJob && !awxActive && ['failed', 'canceled'].includes(status) && !approvalBlock;
+  const hasOutput = hasAwxJob || attempts.some((a) => a.jobId && a.kind === 'job');
+
+  let queuedNotice = '';
+  if (status === 'queued') {
+    if (request.approvalState === 'pending') queuedNotice = t('exec_queued_notice');
+    else if (hasAwxJob) queuedNotice = t('exec_queued_awx');
+  }
 
   const exportPdf = () => {
     setExporting(true);
     try {
       const fileName = `${request.id}-recapitulatif.pdf`;
+      // Journal : fin de la sortie Ascender affichée, sinon le journal enregistré.
+      const outputLines = outputText.split('\n').map((line) => line.trimEnd()).filter(Boolean);
+      const logs = outputLines.length
+        ? outputLines.map((text) => ({ time: '', level: 'info', text }))
+        : (data.logs || []).map((l) => ({ time: l.time, level: l.level, text: tx(l.text, lang) }));
       exportExecutionPdf({
         ref: request.id,
         service: tx(request.service, lang),
@@ -231,21 +224,21 @@ export default function RequestDetailPage() {
           note: tx(s.note, lang),
           tone: s.status,
         })),
-        result: detail.result && status === 'success'
+        result: data.result && status === 'success'
           ? {
-            title: businessLabel(detail.result.type, lang.startsWith('en') ? 'en' : 'fr'),
-            fields: detail.result.fields.map((f) => ({ label: tx(f.label, lang), value: f.value })),
+            title: businessLabel(data.result.type, lang.startsWith('en') ? 'en' : 'fr'),
+            fields: data.result.fields.map((f) => ({ label: tx(f.label, lang), value: f.value })),
           }
           : undefined,
-        error: detail.error && status !== 'running' && status !== 'success'
+        error: data.error && status !== 'running' && status !== 'success'
           ? {
-            code: detail.error.code,
-            severity: detail.error.severity,
-            reason: tx(detail.error.reason, lang),
-            solution: tx(detail.error.solution, lang),
+            code: data.error.code,
+            severity: data.error.severity,
+            reason: tx(data.error.reason, lang),
+            solution: tx(data.error.solution, lang),
           }
           : undefined,
-        logs: logs.map((l) => ({ time: l.time, level: l.level, text: tx(l.text, lang) })),
+        logs,
         labels: {
           title: t('pdf_title'),
           request: t('pdf_section_request'),
@@ -306,16 +299,6 @@ export default function RequestDetailPage() {
               <i className={exporting ? 'ri-loader-4-line mr-1 animate-spin' : 'ri-file-pdf-2-line mr-1'} />
               {exporting ? t('pdf_busy') : t('pdf_export')}
             </button>
-            {status === 'running' && (
-              <button type="button" onClick={() => setPaused((p) => !p)} className="px-4 py-2 rounded-lg border border-background-300 text-sm whitespace-nowrap cursor-pointer hover:bg-background-200">
-                <i className={paused ? 'ri-play-line mr-1' : 'ri-pause-line mr-1'} />{paused ? t('exec_resume') : t('exec_pause')}
-              </button>
-            )}
-            {(status === 'failed' || status === 'canceled') && (
-              <button type="button" onClick={retry} className="px-4 py-2 rounded-lg bg-primary-500 hover:bg-primary-600 text-background-50 dark:text-foreground-950 text-sm font-semibold whitespace-nowrap cursor-pointer">
-                <i className="ri-restart-line mr-1" />{t('exec_retry')}
-              </button>
-            )}
           </div>
         </header>
 
@@ -329,10 +312,10 @@ export default function RequestDetailPage() {
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-3 font-label text-[11px] text-foreground-500">
             <span>{t('summary_eta')} : ~{request.durationSec ? formatDuration(request.durationSec, lang) : `${service?.estimatedMinutes ?? 0} min`}</span>
-            <span>·</span>
-            <span>{request.tenant}</span>
-            {status === 'queued' && <span className="text-accent-700">· {t('exec_queued_notice')}</span>}
-            {status === 'canceled' && <span className="text-foreground-600">· {t('exec_canceled_notice')}</span>}
+            {request.tenant && <span>· {request.tenant}</span>}
+            {status === 'running' && <span>· {t('exec_progress_estimated')}</span>}
+            {queuedNotice && <span className="text-accent-700">· {queuedNotice}</span>}
+            {status === 'canceled' && <span className="text-foreground-600">· {t(hasAwxJob ? 'exec_canceled_awx' : 'exec_canceled_notice')}</span>}
           </div>
         </section>
 
@@ -342,9 +325,9 @@ export default function RequestDetailPage() {
             <ExecutionTimeline steps={steps} />
           </div>
           <div className="flex-1 min-w-0 w-full space-y-5">
-            {detail.error && status !== 'running' && status !== 'success' && <ErrorCard error={detail.error} />}
-            {detail.result && status === 'success' && <ResultCard result={detail.result} />}
-            {!detail.result && status === 'success' && (
+            {data.error && status !== 'running' && status !== 'success' && <ErrorCard error={data.error} />}
+            {data.result && status === 'success' && <ResultCard result={data.result} />}
+            {!data.result && status === 'success' && (
               <section className="p-4 md:p-5 rounded-xl bg-background-50 border border-primary-300 flex items-center gap-3">
                 <span className="w-9 h-9 rounded-lg bg-primary-100 text-primary-700 dark:text-primary-900 flex items-center justify-center"><i className="ri-checkbox-circle-fill" /></span>
                 <p className="text-sm text-foreground-800">{t('exec_business_result')} : <strong className="text-foreground-950">{t('success_title')}</strong></p>
@@ -352,32 +335,51 @@ export default function RequestDetailPage() {
             )}
             <AwxJobCard
               job={awx}
+              attempts={attempts}
+              durationSec={request.durationSec}
+              launchError={request.launchError || ''}
               canLaunch={!hasAwxJob && status !== 'success' && !approvalBlock}
+              canRelaunch={canRelaunch}
               launching={awxLaunching}
               syncing={awxSyncing}
+              canceling={awxCanceling}
               autoRefresh={awxActive}
               launchBlocked={awxBlocked || approvalBlock}
               lastError={awxError}
               awaitingRequester={Boolean(request.awaitingRequester)}
+              outputJobId={outputJobId}
               onLaunch={() => { void launchAwx(); }}
               onSync={() => { void syncAwx(); }}
+              onCancel={() => { void cancelAwx(); }}
+              onShowOutput={setOutputJobId}
             />
             {awx?.kind === 'workflow' && awx.jobId > 0 && (
               <WorkflowNodesCard
                 requestId={request.id}
                 jobUrl={awx.jobUrl}
                 active={awxActive}
-                refreshKey={awxPulse}
+                refreshKey={pulse}
+                selectedJobId={outputJobId}
+                onShowOutput={setOutputJobId}
               />
             )}
-            <ExecutionLogs logs={logs} />
+            {hasOutput && (
+              <JobOutput
+                requestId={request.id}
+                jobId={outputJobId}
+                needsNode={awx?.kind === 'workflow' && outputJobId === null}
+                active={awxActive}
+                refreshKey={awx?.jobId || 0}
+                onText={setOutputText}
+              />
+            )}
           </div>
         </div>
       </div>
 
       {toast && (
         <div className="fixed bottom-6 right-4 md:right-8 z-50 max-w-sm p-3.5 rounded-xl bg-foreground-950 text-background-50 shadow-lg flex items-start gap-2.5">
-          <span className="w-5 h-5 flex items-center justify-center text-primary-300 shrink-0"><i className="ri-file-pdf-2-line" /></span>
+          <span className="w-5 h-5 flex items-center justify-center text-primary-300 shrink-0"><i className="ri-information-line" /></span>
           <p className="text-sm">{toast}</p>
           <button type="button" onClick={() => setToast(null)} aria-label={t('admin_close')} className="ml-2 w-5 h-5 flex items-center justify-center text-background-300 hover:text-background-50 cursor-pointer">
             <i className="ri-close-line" />

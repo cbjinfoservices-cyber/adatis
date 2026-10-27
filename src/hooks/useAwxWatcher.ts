@@ -8,8 +8,9 @@ import {
 /**
  * Surveillance globale des jobs AWX.
  *
- * Toutes les 25 s, le portail rafraîchit les jobs encore actifs et détecte les
- * passages d'un état actif vers un état terminal. Si l'utilisateur n'est pas
+ * Toutes les 25 s, le portail relit les jobs (état tenu à jour côté serveur
+ * par la synchronisation de fond) et détecte les passages d'un état actif
+ * vers un état terminal. Si l'utilisateur n'est pas
  * sur la fiche de la demande concernée, une notification est déposée dans la
  * cloche. Le dernier état connu est conservé localement pour détecter aussi une
  * fin de job survenue après un rechargement de page.
@@ -37,7 +38,7 @@ export default function useAwxWatcher(enabled: boolean) {
 
     const tick = async () => {
       try {
-        const payload = await fetchAwxJobs({ refresh: true, limit: 60 });
+        const payload = await fetchAwxJobs({ limit: 60 });
         if (cancelled) return;
 
         const next: Record<string, AwxSnapshotEntry> = {};

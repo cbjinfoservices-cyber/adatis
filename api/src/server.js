@@ -5,6 +5,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { q } = require('./db');
 const { startProbing } = require('./healthMonitor');
+const { startJobMonitor } = require('./jobMonitor');
 const {
   attachSession, requireAuth, requireRole, authMode, purgeSessions,
 } = require('./auth');
@@ -129,6 +130,7 @@ app.use((err, _req, res, _next) => {
 /** Démarre le serveur et les tâches de fond (sondes, purge des sessions). */
 function start() {
   let stopProbing = () => {};
+  let stopJobMonitor = () => {};
 
   // Production : configuration non sûre = l'API ne démarre pas.
   const problems = configProblems();
@@ -148,6 +150,8 @@ function start() {
     }
     // Sonde interne toutes les 60 s : alimente l'historique 24 h même sans visiteur.
     stopProbing = startProbing();
+    // Synchronisation de fond des jobs Ascender actifs (état et notification de fin).
+    stopJobMonitor = startJobMonitor();
     // Purge horaire des sessions expirées au-delà du délai de grâce.
     setInterval(() => {
       purgeSessions().catch(() => {});
@@ -157,6 +161,7 @@ function start() {
   const shutdown = (signal) => {
     console.log(`[api] arrêt demandé (${signal})`);
     stopProbing();
+    stopJobMonitor();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(1), 10000);
   };

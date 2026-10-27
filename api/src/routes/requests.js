@@ -14,7 +14,7 @@ const { authMode, ensureAccessToken } = require('../auth');
 const router = express.Router();
 
 const REQUEST_SELECT = `
-  SELECT r.*, s.name_fr, s.name_en, s.category_id,
+  SELECT r.*, s.name_fr, s.name_en, s.category_id, s.estimated_minutes,
          u.name AS user_name, u.initials,
          t.name AS tenant_name, cn.name AS connector_name
   FROM requests r
@@ -31,7 +31,50 @@ const LAUNCH_SELECT = `
   FROM services WHERE id = $1
 `;
 
-const TERMINAL_AWX = ['successful', 'failed', 'error', 'canceled'];
+/** Note bilingue d'une étape de la frise. */
+const note = (fr, en = fr) => ({ fr, en });
+
+/**
+ * Frise réelle d'une demande : soumission, approbation éventuelle, lancement
+ * Ascender, exécution, fin. Chaque étape reflète l'état enregistré.
+ */
+const buildTimeline = (row) => {
+  const steps = [{ key: 'submit', status: 'success', note: note('Demande enregistrée', 'Request recorded') }];
+
+  if (row.approval !== 'none') {
+    const approval = {
+      pending: ['running', note('En attente de décision', 'Awaiting decision')],
+      granted: ['success', note('Approuvée', 'Approved')],
+      rejected: ['failed', note('Refusée', 'Rejected')],
+    }[row.approval_state] || ['pending', note('')];
+    steps.push({ key: 'approval', status: approval[0], note: approval[1] });
+  }
+
+  const job = `#${row.awx_job_id}`;
+  const by = row.awx_launched_by || '—';
+  let launch = ['pending', note('')];
+  if (row.awx_job_id) launch = ['success', note(`Job ${job} lancé par ${by}`, `Job ${job} launched by ${by}`)];
+  else if (row.awx_status === 'launch_failed') launch = ['failed', note('Lancement refusé par Ascender', 'Launch refused by Ascender')];
+  else if (row.awx_status === 'awaiting_requester') launch = ['running', note('À lancer par le demandeur', 'To be launched by the requester')];
+  steps.push({ key: 'launch', status: launch[0], note: launch[1] });
+
+  let exec = ['pending', note('')];
+  if (row.awx_job_id) {
+    exec = {
+      queued: ['running', note('En file dans Ascender', 'Queued in Ascender')],
+      running: ['running', note('En cours dans Ascender', 'Running in Ascender')],
+      success: ['success', note('Terminée avec succès', 'Completed successfully')],
+      failed: ['failed', note('Job en échec', 'Job failed')],
+      canceled: ['failed', note('Job annulé', 'Job canceled')],
+    }[row.status] || exec;
+  }
+  steps.push({ key: 'exec', status: exec[0], note: exec[1] });
+  steps.push({ key: 'done', status: row.awx_job_id && row.status === 'success' ? 'success' : 'pending', note: note('') });
+  return steps;
+};
+
+/** Ligne fraîche d'une demande (après lancement, synchronisation, annulation). */
+const reload = async (id) => (await q(`${REQUEST_SELECT} WHERE r.id = $1`, [id])).rows[0];
 
 router.get('/requests', async (req, res, next) => {
   try {
@@ -65,23 +108,22 @@ router.get('/requests', async (req, res, next) => {
 
 router.get('/requests/:id', async (req, res, next) => {
   try {
-    let { rows } = await q(`${REQUEST_SELECT} WHERE r.id = $1`, [req.params.id]);
-    if (!rows.length || !canSee(scopeOf(req), rows[0])) return res.status(404).json({ error: 'request_not_found' });
+    const row = await reload(req.params.id);
+    if (!row || !canSee(scopeOf(req), row)) return res.status(404).json({ error: 'request_not_found' });
 
-    // Job AWX encore actif : on rafraîchit son état avant de répondre.
-    if (rows[0].awx_job_id
-      && ['queued', 'running'].includes(rows[0].status)
-      && req.auth?.session) {
-      await awxJobs.syncRequest({ request: rows[0], session: req.auth.session });
-      ({ rows } = await q(`${REQUEST_SELECT} WHERE r.id = $1`, [req.params.id]));
-    }
-
+    // L'état des jobs est tenu à jour par la synchronisation de fond
+    // (jobMonitor) : l'affichage ne fait que lire la base.
     const detailRows = await q('SELECT * FROM execution_details WHERE request_id = $1', [req.params.id]);
-    const detail = detailRows.rows.length
-      ? m.executionDetail(detailRows.rows[0])
-      : { timeline: [], logs: [] };
+    const stored = detailRows.rows.length ? m.executionDetail(detailRows.rows[0]) : null;
 
-    return res.json({ ...m.request(rows[0]), ...detail });
+    return res.json({
+      ...m.request(row),
+      timeline: stored?.timeline?.length ? stored.timeline : buildTimeline(row),
+      logs: stored?.logs || [],
+      result: stored?.result,
+      error: stored?.error,
+      attempts: await awxJobs.listAttempts(req.params.id),
+    });
   } catch (err) { return next(err); }
 });
 
@@ -185,28 +227,38 @@ router.post('/requests', async (req, res, next) => {
   } catch (err) { return next(err); }
 });
 
-/** Relance manuelle du job template (nouvelle demande ou incident AWX). */
+/**
+ * Lancement manuel : première exécution (approuvée sans jeton du demandeur,
+ * incident Ascender) ou relance après un job en échec ou annulé. Chaque
+ * lancement ajoute une tentative à l'historique de la demande.
+ */
 router.post('/requests/:id/awx/launch', async (req, res, next) => {
   try {
     if (authMode() !== 'awx' || !req.auth?.session) {
       return res.status(409).json({ error: 'awx_disabled' });
     }
-    const { rows } = await q(`${REQUEST_SELECT} WHERE r.id = $1`, [req.params.id]);
-    if (!rows.length || !canSee(scopeOf(req), rows[0])) return res.status(404).json({ error: 'request_not_found' });
-    if (!canActOn(scopeOf(req), rows[0])) return res.status(403).json({ error: 'forbidden' });
-    if (rows[0].awx_job_id) return res.status(409).json({ error: 'awx_job_exists' });
-    if (rows[0].connector_kind && !isWired(rows[0].connector_kind)) {
+    const row = await reload(req.params.id);
+    if (!row || !canSee(scopeOf(req), row)) return res.status(404).json({ error: 'request_not_found' });
+    if (!canActOn(scopeOf(req), row)) return res.status(403).json({ error: 'forbidden' });
+    if (row.awx_job_id && awxJobs.isActive(row.awx_status)) {
+      return res.status(409).json({ error: 'awx_job_active' });
+    }
+    // Un job réussi n'est jamais relancé (risque de double provisionnement).
+    if (row.awx_job_id && !['failed', 'canceled'].includes(row.status)) {
+      return res.status(409).json({ error: 'awx_job_exists' });
+    }
+    if (row.connector_kind && !isWired(row.connector_kind)) {
       return res.status(409).json({ error: 'engine_not_wired' });
     }
-    if (!approvalFlow.LAUNCHABLE.includes(rows[0].approval_state)) {
-      return res.status(409).json({ error: `approval_${rows[0].approval_state}` });
+    if (!approvalFlow.LAUNCHABLE.includes(row.approval_state)) {
+      return res.status(409).json({ error: `approval_${row.approval_state}` });
     }
 
-    const svc = await q(LAUNCH_SELECT, [rows[0].service_id]);
+    const svc = await q(LAUNCH_SELECT, [row.service_id]);
     if (!svc.rows.length) return res.status(404).json({ error: 'service_not_found' });
 
     const launch = await awxJobs.launchForRequest({
-      request: rows[0],
+      request: row,
       service: svc.rows[0],
       session: req.auth.session,
       user: req.auth.user,
@@ -215,24 +267,51 @@ router.post('/requests/:id/awx/launch', async (req, res, next) => {
     if (launch?.error) return res.status(502).json({ error: 'awx_launch_failed', message: launch.error });
     if (launch?.skipped) return res.status(409).json({ error: launch.skipped });
 
-    const full = await q(`${REQUEST_SELECT} WHERE r.id = $1`, [req.params.id]);
-    return res.json(m.request(full.rows[0]));
+    return res.json({
+      ...m.request(await reload(req.params.id)),
+      attempts: await awxJobs.listAttempts(req.params.id),
+    });
   } catch (err) { return next(err); }
 });
 
-/** Rafraîchit l'état du job AWX à la demande de l'interface. */
+/** Annule le job en cours, avec les droits Ascender de la personne connectée. */
+router.post('/requests/:id/awx/cancel', async (req, res, next) => {
+  try {
+    if (authMode() !== 'awx' || !req.auth?.session) {
+      return res.status(409).json({ error: 'awx_disabled' });
+    }
+    const row = await reload(req.params.id);
+    if (!row || !canSee(scopeOf(req), row)) return res.status(404).json({ error: 'request_not_found' });
+    if (!canActOn(scopeOf(req), row)) return res.status(403).json({ error: 'forbidden' });
+    if (!row.awx_job_id) return res.status(409).json({ error: 'awx_job_missing' });
+    if (!awxJobs.isActive(row.awx_status)) return res.status(409).json({ error: 'not_cancelable' });
+
+    const result = await awxJobs.cancelForRequest({ request: row, session: req.auth.session });
+    if (result.error === 'rbac_forbidden') return res.status(403).json({ error: 'rbac_forbidden' });
+    if (result.error === 'cancel_failed') {
+      return res.status(502).json({ error: 'awx_cancel_failed', message: result.message });
+    }
+    if (result.error) return res.status(409).json({ error: result.error });
+
+    return res.json(m.request(await reload(req.params.id)));
+  } catch (err) { return next(err); }
+});
+
+/**
+ * Rafraîchit tout de suite l'état du job (bouton de l'interface), avec le
+ * jeton du lanceur ou, à défaut, celui de la personne connectée.
+ */
 router.post('/requests/:id/awx/sync', async (req, res, next) => {
   try {
-    const { rows } = await q(`${REQUEST_SELECT} WHERE r.id = $1`, [req.params.id]);
-    if (!rows.length || !canSee(scopeOf(req), rows[0])) return res.status(404).json({ error: 'request_not_found' });
-    if (!rows[0].awx_job_id) return res.status(409).json({ error: 'awx_job_missing' });
+    const row = await reload(req.params.id);
+    if (!row || !canSee(scopeOf(req), row)) return res.status(404).json({ error: 'request_not_found' });
+    if (!row.awx_job_id) return res.status(409).json({ error: 'awx_job_missing' });
     if (!req.auth?.session) return res.status(401).json({ error: 'awx_session_missing' });
 
-    const job = await awxJobs.syncRequest({ request: rows[0], session: req.auth.session });
+    const job = await awxJobs.syncRequest({ request: row, session: req.auth.session });
     if (!job) return res.status(502).json({ error: 'awx_sync_failed' });
 
-    const full = await q(`${REQUEST_SELECT} WHERE r.id = $1`, [req.params.id]);
-    return res.json({ ...m.request(full.rows[0]), awxJob: job });
+    return res.json({ ...m.request(await reload(req.params.id)), awxJob: job });
   } catch (err) { return next(err); }
 });
 
@@ -241,14 +320,14 @@ router.post('/requests/:id/awx/sync', async (req, res, next) => {
  */
 router.get('/requests/:id/awx/workflow', async (req, res, next) => {
   try {
-    const { rows } = await q(`${REQUEST_SELECT} WHERE r.id = $1`, [req.params.id]);
-    if (!rows.length || !canSee(scopeOf(req), rows[0])) return res.status(404).json({ error: 'request_not_found' });
-    const row = rows[0];
+    const row = await reload(req.params.id);
+    if (!row || !canSee(scopeOf(req), row)) return res.status(404).json({ error: 'request_not_found' });
     if (!row.awx_job_id) return res.status(409).json({ error: 'awx_job_missing' });
     if (row.awx_job_kind !== 'workflow') return res.status(409).json({ error: 'not_a_workflow' });
     if (!req.auth?.session) return res.status(401).json({ error: 'awx_session_missing' });
 
-    const token = await ensureAccessToken(req.auth.session);
+    // Statut des étapes : jeton du lanceur, comme la synchronisation.
+    const token = await awxJobs.tokenForJob(row, req.auth.session);
     if (!token) return res.status(401).json({ error: 'awx_token_missing' });
 
     const nodes = await awx.fetchWorkflowNodes(row.awx_job_id, token);
@@ -257,6 +336,52 @@ router.get('/requests/:id/awx/workflow', async (req, res, next) => {
       jobId: Number(row.awx_job_id),
       jobUrl: awx.workflowJobUrl(row.awx_job_id),
     });
+  } catch (err) { return next(err); }
+});
+
+/**
+ * Sortie (stdout) d'un job de la demande, lue avec le jeton de la personne
+ * connectée : Ascender applique ses propres droits de lecture. `jobId`
+ * désigne une tentative précédente ou un nœud du workflow courant ; sans
+ * lui, le job courant (job simple uniquement).
+ */
+router.get('/requests/:id/awx/output', async (req, res, next) => {
+  try {
+    const row = await reload(req.params.id);
+    if (!row || !canSee(scopeOf(req), row)) return res.status(404).json({ error: 'request_not_found' });
+    if (!req.auth?.session) return res.status(401).json({ error: 'awx_session_missing' });
+    const token = await ensureAccessToken(req.auth.session);
+    if (!token) return res.status(401).json({ error: 'awx_token_missing' });
+
+    const wanted = Number(req.query.jobId) || 0;
+    let jobId = Number(row.awx_job_id) || 0;
+    if (!wanted) {
+      if (!jobId) return res.status(409).json({ error: 'awx_job_missing' });
+      if (row.awx_job_kind === 'workflow') return res.status(400).json({ error: 'node_required' });
+    } else {
+      // Seuls les jobs rattachés à cette demande sont lisibles ici.
+      const attempt = await q(
+        "SELECT 1 FROM job_attempts WHERE request_id = $1 AND awx_job_id = $2 AND kind = 'job'",
+        [row.id, wanted],
+      );
+      let allowed = attempt.rows.length > 0;
+      if (!allowed && row.awx_job_kind === 'workflow' && row.awx_job_id) {
+        const nodes = await awx.fetchWorkflowNodes(row.awx_job_id, token).catch(() => []);
+        allowed = nodes.some((node) => node.jobId === wanted && node.type === 'job');
+      }
+      if (!allowed) return res.status(404).json({ error: 'job_not_in_request' });
+      jobId = wanted;
+    }
+
+    try {
+      const output = await awx.fetchJobOutput(jobId, token);
+      return res.json({ jobId, ...output });
+    } catch (err) {
+      if (err.status === 403 || err.status === 404) {
+        return res.status(403).json({ error: 'awx_output_forbidden' });
+      }
+      return res.status(502).json({ error: 'awx_output_failed', message: err.message });
+    }
   } catch (err) { return next(err); }
 });
 
@@ -278,12 +403,12 @@ const addToStats = (stats, item) => {
  * Une ligne = une demande routée vers un moteur : job lancé (Ascender) ou
  * demande destinée à un moteur pas encore branché (statut « not_wired »).
  * `kind` filtre un moteur ; `stats` couvre tous les moteurs et `byKind`
- * les détaille. `refresh=1` synchronise d'abord les jobs Ascender actifs.
+ * les détaille. Un lancement refusé par Ascender y figure en « failed ».
  */
 async function listJobs(req, res, next) {
   try {
     const {
-      refresh, status, user, search, kind, limit = 200,
+      status, user, search, kind, limit = 200,
     } = req.query;
     const max = Math.min(Number(limit) || 200, 500);
 
@@ -291,33 +416,25 @@ async function listJobs(req, res, next) {
     const scoped = scopeSql(scopeOf(req), 'r', params);
     params.push(max);
     const jobsSql = `${REQUEST_SELECT}
-       WHERE (r.awx_job_id IS NOT NULL OR r.connector_kind NOT IN ('', 'ascender'))
+       WHERE (r.awx_job_id IS NOT NULL OR r.awx_status = 'launch_failed'
+              OR r.connector_kind NOT IN ('', 'ascender'))
              ${scoped ? ` AND ${scoped}` : ''}
        ORDER BY COALESCE(r.awx_started_at, r.created_at) DESC
        LIMIT $${params.length}`;
-    let { rows } = await q(jobsSql, params);
-
-    const wantsRefresh = ['1', 'true', 'yes'].includes(String(refresh || '').toLowerCase());
-    if (wantsRefresh && req.auth?.session) {
-      const active = rows
-        .filter((row) => !TERMINAL_AWX.includes(String(row.awx_status || '').toLowerCase()))
-        .slice(0, 25);
-      if (active.length) {
-        await Promise.all(active.map((row) => awxJobs
-          .syncRequest({ request: row, session: req.auth.session })
-          .catch(() => null)));
-        ({ rows } = await q(jobsSql, params));
-      }
-    }
+    // État tenu à jour par la synchronisation de fond (jobMonitor) : la liste
+    // ne fait que lire la base, quel que soit le nombre de visiteurs.
+    const { rows } = await q(jobsSql, params);
 
     const items = rows.map((row) => {
       const base = m.request(row);
       const engine = base.engine.kind || 'ascender';
+      let portalStatus = NOT_WIRED;
+      if (isWired(engine)) portalStatus = base.launchError ? 'failed' : awx.portalStatus(base.awx?.status) || '';
       return {
         ...base,
         jobKind: base.awx?.kind || 'job',
-        awxStatus: base.awx?.status || '',
-        portalStatus: isWired(engine) ? awx.portalStatus(base.awx?.status) || '' : NOT_WIRED,
+        awxStatus: base.awx?.status || (base.launchError ? awxJobs.LAUNCH_FAILED : ''),
+        portalStatus,
       };
     });
 

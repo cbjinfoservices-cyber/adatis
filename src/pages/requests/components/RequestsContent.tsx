@@ -26,14 +26,13 @@ export default function RequestsContent() {
 
   useEffect(() => { loadStore(); }, []);
 
-  // Jobs AWX actifs : on rafraîchit leur état réel sans recharger tout le store.
+  // Jobs AWX actifs : leur état est synchronisé côté serveur, on relit la liste.
   const hasActiveAwx = requests.some((r) => Boolean(r.awx) && ['queued', 'running'].includes(r.status));
 
   useEffect(() => {
     if (!hasActiveAwx) return undefined;
     const timer = window.setInterval(async () => {
       try {
-        await api.get('/awx/jobs?refresh=1');
         const fresh = await api.get<RequestItem[]>('/requests?limit=200');
         patchStore({ requests: fresh });
       } catch {

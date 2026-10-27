@@ -64,6 +64,8 @@ function request(row) {
     },
     // Approuvée mais non lancée faute de jeton du demandeur : à lancer par lui.
     awaitingRequester: !row.awx_job_id && row.awx_status === 'awaiting_requester',
+    // Lancement refusé ou en erreur côté Ascender : motif brut (code ou message).
+    launchError: !row.awx_job_id && row.awx_status === 'launch_failed' ? row.awx_launch_error || 'launch_failed' : '',
     awx: row.awx_job_id ? {
       jobId: Number(row.awx_job_id),
       jobUrl: row.awx_job_url || '',
@@ -72,6 +74,8 @@ function request(row) {
       templateName: row.awx_job_template_name || '',
       status: row.awx_status || '',
       startedAt: iso(row.awx_started_at),
+      finishedAt: iso(row.awx_finished_at),
+      syncedAt: iso(row.awx_synced_at),
       launchedBy: row.awx_launched_by || '',
     } : null,
   };

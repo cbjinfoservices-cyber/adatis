@@ -22,7 +22,11 @@ const WORKFLOWS = [{ id: 20, name: 'Provisionner une application', users: ['admi
 const tokenFor = (username) => `tok-${username}`;
 
 function startMockAscender(port = 0) {
-  const state = { nextUser: 'admin', down: false, jobs: new Map(), nextJob: 100, launches: [] };
+  // `jobStatus` : statut des jobs lancés ensuite (setJobStatus le change pour un job).
+  const state = {
+    nextUser: 'admin', down: false, jobs: new Map(), nextJob: 100, launches: [], jobStatus: 'successful', cancels: [],
+    failLaunch: false,
+  };
 
   const send = (res, status, body) => {
     res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -93,24 +97,43 @@ function startMockAscender(port = 0) {
       const list = launch[1] === 'job_templates' ? TEMPLATES : WORKFLOWS;
       const tpl = list.find((t) => t.id === Number(launch[2]));
       if (!tpl || !tpl.users.includes(user.username)) return send(res, 403, { detail: 'You do not have permission.' });
+      if (state.failLaunch) return send(res, 500, { detail: 'Ascender indisponible' });
       let body = '';
       req.on('data', (chunk) => { body += chunk; });
       req.on('end', () => {
         const id = state.nextJob;
         state.nextJob += 1;
-        state.jobs.set(id, { template: tpl, created: Date.now(), user: user.username });
+        state.jobs.set(id, {
+          template: tpl, created: Date.now(), user: user.username, status: state.jobStatus,
+        });
         state.launches.push({ id, template: tpl.id, user: user.username, body: JSON.parse(body || '{}') });
         send(res, 201, launch[1] === 'job_templates' ? { job: id, id, status: 'pending' } : { workflow_job: id, id, status: 'pending' });
       });
       return undefined;
     }
 
-    const job = path.match(/^\/api\/v2\/(jobs|workflow_jobs)\/(\d+)\/$/);
-    if (job && state.jobs.has(Number(job[2]))) {
-      const j = state.jobs.get(Number(job[2]));
+    // Un job n'est lisible que par son lanceur et les superutilisateurs.
+    const jobPath = path.match(/^\/api\/v2\/(jobs|workflow_jobs)\/(\d+)\/(cancel\/|stdout\/)?$/);
+    if (jobPath && state.jobs.has(Number(jobPath[2]))) {
+      const id = Number(jobPath[2]);
+      const j = state.jobs.get(id);
+      if (j.user !== user.username && !user.is_superuser) return send(res, 403, { detail: 'You do not have permission.' });
+
+      if (jobPath[3] === 'cancel/' && req.method === 'POST') {
+        if (!['pending', 'waiting', 'running'].includes(j.status)) return send(res, 405, { error: 'not allowed' });
+        j.status = 'canceled';
+        state.cancels.push({ id, user: user.username });
+        return send(res, 202);
+      }
+      if (jobPath[3] === 'stdout/') {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        return res.end(`PLAY [${j.template.name}] ***\nTASK [Gathering Facts] ***\nok: [host-${id}]\n`);
+      }
+
+      const done = !['pending', 'waiting', 'running'].includes(j.status);
       return send(res, 200, {
-        id: Number(job[2]), status: 'successful', failed: false, elapsed: 3,
-        started: new Date(j.created).toISOString(), finished: new Date(j.created + 3000).toISOString(),
+        id, status: j.status, failed: j.status === 'failed', elapsed: done ? 3 : 0,
+        started: new Date(j.created).toISOString(), finished: done ? new Date(j.created + 3000).toISOString() : null,
         summary_fields: { job_template: { id: j.template.id, name: j.template.name } },
       });
     }
@@ -126,6 +149,11 @@ function startMockAscender(port = 0) {
         state,
         setUser: (username) => { state.nextUser = username; },
         setDown: (down) => { state.down = down; },
+        /** Statut des prochains jobs lancés, ou d'un job précis. */
+        setJobStatus: (status, jobId) => {
+          if (jobId) state.jobs.get(Number(jobId)).status = status;
+          else state.jobStatus = status;
+        },
         close: () => new Promise((done) => { server.closeAllConnections?.(); server.close(done); }),
       });
     });

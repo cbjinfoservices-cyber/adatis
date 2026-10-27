@@ -71,6 +71,11 @@ Détail complet, exploitation et points hors code : [SECURITY.md](SECURITY.md).
   décision finale ; le job part alors avec le jeton du demandeur, même déconnecté
   depuis moins de `SESSION_LAUNCH_GRACE_DAYS` jours (sinon il le lance lui-même).
   Personne ne peut approuver sa propre demande.
+- **Suivi des jobs** : une tâche de fond relit les jobs actifs avec le jeton de
+  leur lanceur ; les pages ne font que lire la base. La sortie d'un job est lue
+  avec le jeton de la personne qui la consulte (droits Ascender appliqués).
+  Annulation et relance (après échec ou annulation) suivent les droits de la
+  demande ; chaque lancement est conservé dans l'historique des tentatives.
 - **Formulaires** : validés côté serveur ; seuls les champs du schéma partent
   dans les `extra_vars` Ascender.
 - **Jetons Ascender et champs mot de passe** : chiffrés en base (AES-256-GCM,
@@ -103,5 +108,7 @@ Détail complet, exploitation et points hors code : [SECURITY.md](SECURITY.md).
 | `TRUST_PROXY_HOPS` | Proxys de confiance devant l'API (1) |
 | `RATE_LIMIT_API`, `RATE_LIMIT_LOGIN` | Requêtes par minute et par IP (600 / 20) |
 | `SESSION_LAUNCH_GRACE_DAYS` | Jours pendant lesquels une session expirée peut encore lancer un job approuvé (7) |
+| `JOB_SYNC_INTERVAL_SEC` | Période de la synchronisation de fond des jobs Ascender actifs (15, minimum 5) |
+| `JOB_NOTIFY_EMAIL` | Email au demandeur à la fin de son job, si un transport email est configuré (`true`) |
 
 Le détail du déploiement Kubernetes est dans `deploy/README.md`.

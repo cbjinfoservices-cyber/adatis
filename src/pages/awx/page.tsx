@@ -5,9 +5,10 @@ import { ErrorBlock, LoadingBlock } from '@/components/base/DataState';
 import AwxJobsSummary from '@/pages/awx/components/AwxJobsSummary';
 import AwxJobsTable from '@/pages/awx/components/AwxJobsTable';
 import {
-  AWX_FILTER_STATUSES, fetchAwxJobs,
-  type AwxJobRow, type AwxJobsStats,
+  AWX_FILTER_STATUSES, engineOf, fetchAwxJobs,
+  type AwxJobRow, type AwxJobsStats, type EngineStats,
 } from '@/utils/awxJobs';
+import { KIND_ICON, kindLabel, type ConnectorKind } from '@/utils/connectors';
 
 const POLL_MS = 10000;
 
@@ -19,6 +20,9 @@ export default function AwxTrackingPage() {
   const { t, i18n } = useTranslation();
   const [items, setItems] = useState<AwxJobRow[]>([]);
   const [stats, setStats] = useState<AwxJobsStats>(EMPTY_STATS);
+  const [kinds, setKinds] = useState<string[]>([]);
+  const [byKind, setByKind] = useState<Record<string, EngineStats>>({});
+  const [engine, setEngine] = useState('all');
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -35,15 +39,20 @@ export default function AwxTrackingPage() {
   const load = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
     try {
-      const payload = await fetchAwxJobs({ refresh: true });
+      // L'état est synchronisé côté serveur : la liste ne fait que lire la base.
+      const payload = await fetchAwxJobs();
       setItems(payload.items);
       setStats(payload.stats);
+      setKinds(payload.kinds || []);
+      setByKind(payload.byKind || {});
       setFetchedAt(payload.fetchedAt);
       setError(null);
     } catch (err) {
       if (!silent) {
         setItems([]);
         setStats(EMPTY_STATS);
+        setKinds([]);
+        setByKind({});
         setError(err instanceof Error ? err.message : null);
       }
     } finally {
@@ -74,14 +83,15 @@ export default function AwxTrackingPage() {
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return items.filter((item) => {
+      if (engine !== 'all' && engineOf(item) !== engine) return false;
       if (status !== 'all' && item.portalStatus !== status) return false;
       if (user && item.user !== user && item.awx?.launchedBy !== user) return false;
       if (!needle) return true;
-      return `${item.id} ${item.service.fr} ${item.service.en} ${item.user} ${item.tenant} ${item.awx?.templateName || ''}`
+      return `${item.id} ${item.service.fr} ${item.service.en} ${item.user} ${item.tenant} ${item.awx?.templateName || ''} ${kindLabel(engineOf(item))} ${item.engine?.connectorName || ''}`
         .toLowerCase()
         .includes(needle);
     });
-  }, [items, status, user, search]);
+  }, [items, engine, status, user, search]);
 
   const updatedLabel = fetchedAt
     ? new Date(fetchedAt).toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -124,6 +134,38 @@ export default function AwxTrackingPage() {
             <AwxJobsSummary stats={stats} />
 
             <div className="rounded-xl bg-background-50 border border-background-200 p-3 md:p-4 space-y-3">
+              {kinds.length > 1 && (
+                <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t('awx_track_filter_engine')}>
+                  <button
+                    type="button"
+                    onClick={() => setEngine('all')}
+                    aria-pressed={engine === 'all'}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border whitespace-nowrap cursor-pointer transition-colors ${engine === 'all' ? 'border-primary-400 bg-primary-500/10 text-primary-700 dark:text-primary-300 font-semibold' : 'bg-background-50 border-background-300 text-foreground-700 hover:border-foreground-400'}`}
+                  >
+                    {t('awx_track_all_engines')}
+                    <span className="font-label tabular-nums opacity-70">{stats.total}</span>
+                  </button>
+                  {kinds.map((kind) => {
+                    const kindStats = byKind[kind];
+                    return (
+                      <button
+                        key={kind}
+                        type="button"
+                        onClick={() => setEngine(kind)}
+                        aria-pressed={engine === kind}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border whitespace-nowrap cursor-pointer transition-colors ${engine === kind ? 'border-primary-400 bg-primary-500/10 text-primary-700 dark:text-primary-300 font-semibold' : 'bg-background-50 border-background-300 text-foreground-700 hover:border-foreground-400'}`}
+                      >
+                        <i className={KIND_ICON[kind as ConnectorKind] || 'ri-plug-line'} aria-hidden="true" />
+                        {kindLabel(kind)}
+                        <span className="font-label tabular-nums opacity-70">{kindStats?.total ?? 0}</span>
+                        {kindStats && !kindStats.wired && (
+                          <span className="font-label text-[9px] uppercase tracking-wider px-1 rounded bg-background-200 text-foreground-600">{t('status_not_wired')}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-2">
                 {AWX_FILTER_STATUSES.map((value) => (
                   <button

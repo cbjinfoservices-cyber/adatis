@@ -316,6 +316,46 @@ const fetchWorkflowNodes = async (workflowJobId, accessToken) => {
   });
 };
 
+/**
+ * Annule un job ou un workflow en cours, avec le jeton de l'utilisateur.
+ * AWX répond 405 quand le job ne peut plus être annulé (déjà terminé).
+ */
+const cancelJob = async ({ kind, jobId, accessToken }) => {
+  const id = Number(jobId);
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Job Ascender invalide');
+  const resource = kind === 'workflow' ? 'workflow_jobs' : 'jobs';
+  await apiRequest(`/api/v2/${resource}/${id}/cancel/`, accessToken, { method: 'POST', body: '{}' });
+};
+
+/** Taille maximale de sortie renvoyée à l'interface (la fin du journal). */
+const OUTPUT_MAX_BYTES = 256 * 1024;
+
+/**
+ * Sortie texte d'un job (ANSI retiré par AWX avec format=txt). Seule la fin
+ * est conservée au-delà de OUTPUT_MAX_BYTES.
+ */
+const fetchJobOutput = async (jobId, accessToken) => {
+  const id = Number(jobId);
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Job Ascender invalide');
+  const config = readConfig();
+  const path = `/api/v2/jobs/${id}/stdout/?format=txt`;
+  const response = await fetch(`${config.baseUrl}${path}`, {
+    headers: { Accept: 'text/plain', Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(timeoutMs()),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    const error = new Error(`Ascender a répondu ${response.status} sur ${path}`);
+    error.status = response.status;
+    throw error;
+  }
+  const truncated = Buffer.byteLength(text) > OUTPUT_MAX_BYTES;
+  return {
+    text: truncated ? Buffer.from(text).subarray(-OUTPUT_MAX_BYTES).toString() : text,
+    truncated,
+  };
+};
+
 /** Lien direct vers l'écran du job dans l'interface AWX. */
 const jobUrl = (jobId) => {
   const config = readConfig();
@@ -486,6 +526,8 @@ module.exports = {
   fetchJob,
   fetchWorkflowJob,
   fetchWorkflowNodes,
+  cancelJob,
+  fetchJobOutput,
   jobUrl,
   workflowJobUrl,
   listAccessibleTemplates,

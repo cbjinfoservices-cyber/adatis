@@ -36,6 +36,8 @@ export interface RequestItem {
   approval: string;
   approvalState: string;
   awaitingRequester?: boolean;
+  /** Lancement refusé ou en erreur côté Ascender : code (no_awx_token, rbac_forbidden) ou message. */
+  launchError?: string;
   /** Moteur (type de connecteur) retenu à la commande. */
   engine?: { kind: string; connectorId: string | null; connectorName: string };
   businessType: string;
@@ -51,6 +53,9 @@ export interface AwxJob {
   templateName: string;
   status: string;
   startedAt: string | null;
+  finishedAt?: string | null;
+  /** Dernière lecture de l'état dans Ascender (synchronisation de fond). */
+  syncedAt?: string | null;
   launchedBy: string;
 }
 
@@ -76,6 +81,7 @@ export const AWX_STATUS_STYLE: Record<string, string> = {
   failed: 'bg-accent-100 text-accent-900',
   error: 'bg-accent-100 text-accent-900',
   canceled: 'bg-background-200 text-foreground-600',
+  launch_failed: 'bg-accent-100 text-accent-900',
 };
 
 export interface RequestDetailData {
@@ -83,7 +89,27 @@ export interface RequestDetailData {
   logs: LogLine[];
   result?: RequestResult;
   error?: RequestError;
+  /** Lancements successifs de la demande, le plus récent d'abord. */
+  attempts?: JobAttempt[];
 }
+
+/** Une tentative de lancement : job lancé, ou refus d'Ascender (`launch_failed`). */
+export interface JobAttempt {
+  attempt: number;
+  jobId: number | null;
+  jobUrl: string;
+  kind: 'job' | 'workflow';
+  templateName: string;
+  status: string;
+  error: string;
+  launchedBy: string;
+  launchedAt: string;
+  finishedAt: string | null;
+  elapsedSec: number;
+}
+
+/** États Ascender d'un job encore actif. */
+export const ACTIVE_AWX = ['new', 'pending', 'waiting', 'running'];
 
 /** Demande déjà chargée dans le store (liste « Mes demandes »). */
 export const getRequest = (id?: string) => getStoreState().requests.find((r) => r.id === id);
@@ -103,16 +129,6 @@ export const formatDate = (iso: string, lang: string) => {
     day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
   });
 };
-
-/** Messages affichés pendant la simulation d'une exécution en cours. */
-export const LIVE_LOG_TEMPLATES: { level: LogLine['level']; text: I18nText }[] = [
-  { level: 'info', text: { fr: 'Application des rôles de configuration', en: 'Applying configuration roles' } },
-  { level: 'success', text: { fr: 'Service système redémarré', en: 'System service restarted' } },
-  { level: 'info', text: { fr: 'Vérification des dépendances réseau', en: 'Checking network dependencies' } },
-  { level: 'success', text: { fr: 'Certificat TLS installé', en: 'TLS certificate installed' } },
-  { level: 'warning', text: { fr: 'Reprise après un ralentissement du stockage', en: 'Retried after a storage slowdown' } },
-  { level: 'success', text: { fr: 'Contrôles de conformité validés', en: 'Compliance checks validated' } },
-];
 
 export const STATUS_STYLE: Record<ExecutionStatus, { cls: string; icon: string }> = {
   queued: { cls: 'bg-secondary-100 text-secondary-800 dark:text-secondary-900', icon: 'ri-time-line' },
