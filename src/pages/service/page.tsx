@@ -8,8 +8,8 @@ import RequestSummary from '@/pages/service/components/RequestSummary';
 import { ErrorBlock, LoadingBlock } from '@/components/base/DataState';
 import { api, ApiError } from '@/utils/api';
 import { tx } from '@/utils/catalog';
-import { loadStore, useStore } from '@/utils/store';
-import type { FieldValue, ServiceItem, UniversalFormSchema } from '@/types/catalog';
+import { loadStore } from '@/utils/store';
+import { PROJECT_ICON, type FieldValue, type ServiceItem, type UniversalFormSchema } from '@/types/catalog';
 import type { AwxLaunchResult, RequestItem } from '@/utils/executions';
 
 type ServicePayload = ServiceItem & { form: UniversalFormSchema | null };
@@ -17,7 +17,6 @@ type ServicePayload = ServiceItem & { form: UniversalFormSchema | null };
 export default function ServicePage() {
   const { id } = useParams();
   const { t, i18n } = useTranslation();
-  const { projects } = useStore();
   const [service, setService] = useState<ServicePayload | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [values, setValues] = useState<Record<string, FieldValue>>({});
@@ -98,8 +97,6 @@ export default function ServicePage() {
   }
 
   const schema = service.form;
-  const project = projects.find((p) => p.id === service.project);
-
   return (
     <AppShell>
       <div className="px-4 md:px-10 py-6 md:py-8">
@@ -110,8 +107,13 @@ export default function ServicePage() {
           </span>
           <div className="min-w-0">
             <p className="font-label text-[11px] uppercase tracking-widest text-foreground-500 flex items-center gap-1.5">
-              <i className={project?.icon || 'ri-folder-line'} />
-              {t('catalog_project')} · {t(`proj_${service.project}`)} · {t(`cat_${service.category}`)}
+              {service.project && (
+                <>
+                  <i className={PROJECT_ICON} />
+                  {t('catalog_project')} · {service.project.name} ·
+                </>
+              )}
+              {' '}{t(`cat_${service.category}`)}
             </p>
             <h1 className="font-heading text-2xl md:text-3xl font-bold text-foreground-950">{tx(service.name, i18n.language)}</h1>
             <p className="mt-1 text-sm text-foreground-600 max-w-2xl">{tx(service.description, i18n.language)}</p>

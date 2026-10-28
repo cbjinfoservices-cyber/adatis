@@ -6,12 +6,13 @@ export type CategoryId =
   | 'network' | 'security' | 'storage' | 'identity' | 'messaging'
   | 'monitoring' | 'backup' | 'custom';
 
-export type ProjectId = 'crm' | 'cloud' | 'soc2' | 'hr' | 'observability';
-
+/** Projet Ascender (dépôt SCM) du job template d'un service. `id` : id AWX, en texte. */
 export interface ProjectItem {
-  id: ProjectId;
-  icon: string;
+  id: string;
+  name: string;
 }
+
+export const PROJECT_ICON = 'ri-git-repository-line';
 
 export type ApprovalLevel = 'none' | 'manager' | 'technical' | 'security' | 'multi';
 
@@ -19,7 +20,8 @@ export interface ServiceItem {
   id: string;
   name: I18nText;
   category: CategoryId;
-  project: ProjectId;
+  /** Null : workflow (sans projet dans Ascender), service non relié ou sans session Ascender. */
+  project: ProjectItem | null;
   description: I18nText;
   icon: string;
   approval: ApprovalLevel;

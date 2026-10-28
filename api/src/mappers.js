@@ -7,18 +7,23 @@ const t = (fr, en) => ({ fr: fr || '', en: en || en || fr || '' });
 const num = (value) => (value === null || value === undefined ? 0 : Number(value));
 const iso = (value) => (value instanceof Date ? value.toISOString() : value || null);
 
-function project(row) {
-  return { id: row.id, icon: row.icon };
+/** Projet Ascender (id AWX en texte : il sert aussi de paramètre d'URL). */
+function project(awxProject) {
+  return { id: String(awxProject.id), name: awxProject.name };
 }
 
 function category(row) {
   return { id: row.id, icon: row.icon };
 }
 
-function service(row) {
+/**
+ * @param {any} row
+ * @param {{ id: number, name: string } | null} [awxProject] projet Ascender du job template, s'il est connu
+ */
+function service(row, awxProject = null) {
   return {
     id: row.id,
-    project: row.project_id,
+    project: awxProject ? project(awxProject) : null,
     category: row.category_id,
     name: t(row.name_fr, row.name_en),
     description: t(row.description_fr, row.description_en),

@@ -381,8 +381,14 @@ const stripBaseUrl = (url) => {
   return text.startsWith(config.baseUrl) ? text.slice(config.baseUrl.length) : text;
 };
 
+/**
+ * Ids des modèles lançables, et le projet Ascender de chacun (un job template
+ * appartient à un projet SCM ; un workflow n'en a pas).
+ * @returns {Promise<{ ids: Set<number>, projects: Map<number, { id: number, name: string }> }>}
+ */
 const collectTemplateIds = async (accessToken, path) => {
   const ids = new Set();
+  const projects = new Map();
   let next = path;
   for (let page = 0; next && page < 5; page += 1) {
     // eslint-disable-next-line no-await-in-loop
@@ -391,19 +397,26 @@ const collectTemplateIds = async (accessToken, path) => {
       const id = Number(tpl?.id);
       const caps = tpl?.summary_fields?.user_capabilities || {};
       const canStart = caps.start !== false && caps.execute !== false;
-      if (Number.isInteger(id) && id > 0 && canStart) ids.add(id);
+      if (!Number.isInteger(id) || id <= 0 || !canStart) return;
+      ids.add(id);
+      const project = tpl?.summary_fields?.project;
+      const projectId = Number(project?.id ?? tpl?.project);
+      if (Number.isInteger(projectId) && projectId > 0) {
+        projects.set(id, { id: projectId, name: String(project?.name || `#${projectId}`) });
+      }
     });
     next = payload?.next ? stripBaseUrl(payload.next) : '';
   }
-  return ids;
+  return { ids, projects };
 };
 
+/** Droits AWX de l'utilisateur et projet de chaque job template visible. */
 const listAccessibleTemplates = async (accessToken) => {
-  const [templates, workflows] = await Promise.all([
+  const [jobs, workflows] = await Promise.all([
     collectTemplateIds(accessToken, '/api/v2/job_templates/?page_size=200&order_by=id'),
     collectTemplateIds(accessToken, '/api/v2/workflow_job_templates/?page_size=200&order_by=id'),
   ]);
-  return { templates, workflows };
+  return { templates: jobs.ids, workflows: workflows.ids, projectOfTemplate: jobs.projects };
 };
 
 /** Modèles accessibles avec leur libellé : utilisé par l'administration. */

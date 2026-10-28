@@ -1,9 +1,8 @@
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ApprovalBadge from '@/components/base/ApprovalBadge';
-import { projectIconOf } from '@/utils/store';
 import { tx } from '@/utils/catalog';
-import type { ServiceItem } from '@/types/catalog';
+import { PROJECT_ICON, type ServiceItem } from '@/types/catalog';
 
 export default function ServiceCard({ service, index }: { service: ServiceItem; index: number }) {
   const { t, i18n } = useTranslation();
@@ -16,10 +15,12 @@ export default function ServiceCard({ service, index }: { service: ServiceItem; 
         <span className="font-label text-[11px] uppercase tracking-wider text-foreground-500">{t(`cat_${service.category}`)}</span>
       </div>
       <h3 className="mt-4 font-heading font-semibold text-sm md:text-base text-foreground-950">{tx(service.name, i18n.language)}</h3>
-      <span className="mt-2 inline-flex items-center gap-1 self-start px-2 py-0.5 rounded-full bg-background-100 border border-background-200 text-foreground-600 font-label text-[10px] uppercase tracking-wider whitespace-nowrap">
-        <i className={projectIconOf(service.project)} />
-        {t(`proj_${service.project}`)}
-      </span>
+      {service.project && (
+        <span className="mt-2 inline-flex items-center gap-1 self-start px-2 py-0.5 rounded-full bg-background-100 border border-background-200 text-foreground-600 font-label text-[10px] uppercase tracking-wider whitespace-nowrap">
+          <i className={PROJECT_ICON} />
+          {service.project.name}
+        </span>
+      )}
       <p className="mt-1.5 text-xs md:text-sm text-foreground-600 leading-relaxed flex-1">{tx(service.description, i18n.language)}</p>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <ApprovalBadge level={service.approval} />

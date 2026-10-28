@@ -7,18 +7,19 @@ import CatalogToolbar, { type SortKey } from '@/pages/home/components/CatalogToo
 import HeroProjectPicker from '@/pages/home/components/HeroProjectPicker';
 import { ErrorBlock, LoadingBlock } from '@/components/base/DataState';
 import { tx } from '@/utils/catalog';
-import { loadStore, projectIconOf, reloadStore, useStore } from '@/utils/store';
-import type { ProjectId } from '@/types/catalog';
+import { loadStore, reloadStore, useStore } from '@/utils/store';
+import { PROJECT_ICON } from '@/types/catalog';
 
 export default function Home() {
   const { t, i18n } = useTranslation();
   const { services, projects, status, error } = useStore();
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
-  const [project, setProject] = useState<ProjectId | 'all'>(() => {
-    const fromUrl = searchParams.get('project');
-    return fromUrl && projects.some((p) => p.id === fromUrl) ? (fromUrl as ProjectId) : 'all';
-  });
+  // ?project=<id Ascender> : les projets arrivent après le premier rendu, le
+  // paramètre n'est donc validé qu'une fois la liste connue.
+  const [requestedProject, setRequestedProject] = useState(() => searchParams.get('project') || 'all');
+  const selectedProject = projects.find((p) => p.id === requestedProject) || null;
+  const project = selectedProject ? selectedProject.id : 'all';
   const [sort, setSort] = useState<SortKey>('popular');
   const [groupByCategory, setGroupByCategory] = useState(true);
   const listRef = useRef<HTMLElement | null>(null);
@@ -26,13 +27,13 @@ export default function Home() {
   useEffect(() => { loadStore(); }, []);
 
   const projectCounts = useMemo(() => {
-    const c: Partial<Record<ProjectId, number>> = {};
-    services.forEach((s) => { c[s.project] = (c[s.project] || 0) + 1; });
+    const c: Record<string, number> = {};
+    services.forEach((s) => { if (s.project) c[s.project.id] = (c[s.project.id] || 0) + 1; });
     return c;
   }, [services]);
 
   const scoped = useMemo(
-    () => (project === 'all' ? services : services.filter((s) => s.project === project)),
+    () => (project === 'all' ? services : services.filter((s) => s.project?.id === project)),
     [services, project],
   );
 
@@ -54,8 +55,8 @@ export default function Home() {
     return list.sort((a, b) => b.popularity - a.popularity);
   }, [filtered, sort, i18n.language]);
 
-  const selectProject = (next: ProjectId | 'all', scroll = false) => {
-    setProject(next);
+  const selectProject = (next: string, scroll = false) => {
+    setRequestedProject(next);
     const params = new URLSearchParams(searchParams);
     if (next === 'all') params.delete('project');
     else params.set('project', next);
@@ -126,10 +127,10 @@ export default function Home() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="font-heading text-lg font-semibold text-foreground-950">{t('all_services')}</h2>
             <div className="flex flex-wrap items-center gap-2">
-              {filteredByProject && (
+              {selectedProject && (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary-50 border border-primary-200 text-primary-700 font-label text-[11px] whitespace-nowrap">
-                  <i className={projectIconOf(project)} />
-                  {t(`proj_${project}`)}
+                  <i className={PROJECT_ICON} />
+                  {selectedProject.name}
                   <button type="button" onClick={() => selectProject('all')} aria-label={t('project_clear')} className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-primary-100 cursor-pointer">
                     <i className="ri-close-line text-xs" />
                   </button>

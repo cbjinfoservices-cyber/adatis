@@ -32,7 +32,7 @@ until psql -tAc 'SELECT 1' >/dev/null 2>&1; do
   sleep 2
 done
 
-if [ -n "$(psql -tAc "SELECT to_regclass('public.projects')")" ]; then
+if [ -n "$(psql -tAc "SELECT to_regclass('public.services')")" ]; then
   echo "[migrate] schéma existant détecté : baseline des scripts initiaux"
   for version in 001_schema.sql 002_seed.sql; do
     psql -v ON_ERROR_STOP=1 -q -c \

@@ -7,26 +7,35 @@ const awxRbac = require('../awxRbac');
 const router = express.Router();
 
 /**
+ * Services proposés à l'utilisateur connecté, chacun avec son projet Ascender.
+ *
  * Filtre RBAC : un service n'est proposé que si le job template (ou workflow)
- * AWX associé est réellement accessible à l'utilisateur connecté, avec son
- * propre jeton. Sans session AWX (auth désactivée ou AWX injoignable) on
- * n'applique aucun filtre.
+ * AWX associé est réellement accessible, avec le jeton de l'utilisateur. Le
+ * même appel (mis en cache) donne le projet de chaque job template. Sans
+ * session AWX (auth désactivée ou AWX injoignable) : aucun filtre, aucun projet.
  */
-const keepAllowedServices = async (req, rows) => {
-  if (!req.auth?.session) return rows;
-  const access = await awxRbac.accessForSession(req.auth.session);
-  if (!access) return rows;
-  return rows.filter((row) => {
-    const template = awxJobs.templateForService(row);
-    if (!template) return true;
-    return awxRbac.allowed(access, template.kind, template.id);
-  });
+const visibleServices = async (req, rows) => {
+  const access = req.auth?.session ? await awxRbac.accessForSession(req.auth.session) : null;
+  return rows
+    .map((row) => ({ row, template: awxJobs.templateForService(row) }))
+    .filter(({ template }) => !access || !template || awxRbac.allowed(access, template.kind, template.id))
+    .map(({ row, template }) => ({ row, project: awxRbac.projectOf(access, template) }));
 };
 
-router.get('/projects', async (_req, res, next) => {
+const serviceRows = () => q('SELECT * FROM services');
+
+/**
+ * Projets Ascender des services visibles, triés par nom. Un projet sans
+ * service relié au catalogue n'est pas proposé.
+ */
+router.get('/projects', async (req, res, next) => {
   try {
-    const { rows } = await q('SELECT id, icon FROM projects ORDER BY sort_order');
-    res.json(rows.map(m.project));
+    const services = await visibleServices(req, (await serviceRows()).rows);
+    const projects = new Map();
+    services.forEach(({ project }) => { if (project) projects.set(project.id, project); });
+    res.json([...projects.values()]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(m.project));
   } catch (err) { next(err); }
 });
 
@@ -43,10 +52,6 @@ router.get('/services', async (req, res, next) => {
     const where = [];
     const params = [];
 
-    if (project) {
-      params.push(project);
-      where.push(`s.project_id = $${params.length}`);
-    }
     if (category) {
       params.push(category);
       where.push(`s.category_id = $${params.length}`);
@@ -74,8 +79,11 @@ router.get('/services', async (req, res, next) => {
        ORDER BY ${orderBy}`,
       params,
     );
-    const allowedRows = await keepAllowedServices(req, rows);
-    res.json(allowedRows.map(m.service));
+    // Le projet vient d'Ascender : le filtre s'applique après sa lecture.
+    const wantedProject = String(project || '');
+    const services = (await visibleServices(req, rows))
+      .filter((s) => !wantedProject || String(s.project?.id || '') === wantedProject);
+    res.json(services.map((s) => m.service(s.row, s.project)));
   } catch (err) { next(err); }
 });
 
@@ -84,10 +92,10 @@ router.get('/services/:id', async (req, res, next) => {
     const { rows } = await q('SELECT * FROM services WHERE id = $1', [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'service_not_found' });
 
-    const allowedRows = await keepAllowedServices(req, rows);
-    if (!allowedRows.length) return res.status(403).json({ error: 'service_forbidden' });
+    const [visible] = await visibleServices(req, rows);
+    if (!visible) return res.status(403).json({ error: 'service_forbidden' });
 
-    const service = m.service(rows[0]);
+    const service = m.service(visible.row, visible.project);
     let form = null;
     if (rows[0].form_id) {
       const formRows = await q('SELECT * FROM form_schemas WHERE id = $1', [rows[0].form_id]);

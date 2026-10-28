@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { api } from '@/utils/api';
-import type { CategoryId, ProjectId, ProjectItem, ServiceItem } from '@/types/catalog';
+import type { CategoryId, ProjectItem, ServiceItem } from '@/types/catalog';
 import type { Connector } from '@/utils/connectors';
 import type { ApprovalItem, AuditEntry } from '@/utils/approvals';
 import type { RequestItem } from '@/utils/executions';
@@ -165,9 +165,6 @@ export const reloadStore = () => {
 
 /** Remplace une tranche du store après une mutation (PATCH / POST). */
 export const patchStore = (patch: Partial<StoreState>) => commit(patch);
-
-export const projectIconOf = (id: ProjectId): string =>
-  state.projects.find((p) => p.id === id)?.icon || 'ri-folder-line';
 
 export const categoryIconOf = (id: CategoryId): string =>
   state.categories.find((c) => c.id === id)?.icon || 'ri-tools-line';

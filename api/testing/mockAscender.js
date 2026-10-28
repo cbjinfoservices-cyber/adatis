@@ -13,9 +13,10 @@ const USERS = {
 };
 
 // Template 9 (DNS) visible par tous, 7 (VM) et workflow 20 réservés à admin.
+// Chaque job template appartient à un projet Ascender ; un workflow n'en a pas.
 const TEMPLATES = [
-  { id: 7, name: 'Créer VM Linux', users: ['admin'] },
-  { id: 9, name: 'Créer entrée DNS', users: ['admin', 'alice', 'bob', 'carol'] },
+  { id: 7, name: 'Créer VM Linux', users: ['admin'], project: { id: 31, name: 'infra-provisioning' } },
+  { id: 9, name: 'Créer entrée DNS', users: ['admin', 'alice', 'bob', 'carol'], project: { id: 32, name: 'network-dns' } },
 ];
 const WORKFLOWS = [{ id: 20, name: 'Provisionner une application', users: ['admin'] }];
 
@@ -87,7 +88,12 @@ function startMockAscender(port = 0) {
 
     const visible = (list) => list.filter((t) => t.users.includes(user.username)).map((t) => ({
       id: t.id, name: t.name, description: '',
-      summary_fields: { organization: { name: 'Infra' }, user_capabilities: { start: true } },
+      ...(t.project ? { project: t.project.id } : {}),
+      summary_fields: {
+        organization: { name: 'Infra' },
+        user_capabilities: { start: true },
+        ...(t.project ? { project: { id: t.project.id, name: t.project.name } } : {}),
+      },
     }));
     if (path === '/api/v2/job_templates/') return send(res, 200, { count: 0, next: null, results: visible(TEMPLATES) });
     if (path === '/api/v2/workflow_job_templates/') return send(res, 200, { count: 0, next: null, results: visible(WORKFLOWS) });

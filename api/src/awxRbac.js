@@ -44,9 +44,22 @@ const allowed = (access, kind, templateId) => {
   return set.has(id);
 };
 
+/**
+ * Projet Ascender d'un service : celui de son job template, tel que le voit
+ * l'utilisateur. Null pour un workflow (sans projet dans AWX), un service non
+ * relié ou sans droits Ascender lisibles.
+ * @returns {{ id: number, name: string } | null}
+ */
+const projectOf = (access, template) => {
+  if (!access?.projectOfTemplate || template?.kind !== 'job') return null;
+  return access.projectOfTemplate.get(Number(template.id)) || null;
+};
+
 const forget = (session) => {
   const key = cacheKey(session);
   if (key) cache.delete(key);
 };
 
-module.exports = { accessForSession, allowed, forget };
+module.exports = {
+  accessForSession, allowed, projectOf, forget,
+};
