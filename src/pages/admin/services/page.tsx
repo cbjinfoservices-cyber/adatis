@@ -10,6 +10,8 @@ import {
   fetchAdminServices, fetchAwxTemplates,
   type AdminServiceItem, type AwxTemplateCatalog, type AwxTemplateKind,
 } from '@/utils/awxAdmin';
+import Toast from '@/components/base/Toast';
+import useToast from '@/hooks/useToast';
 
 type Filter = 'all' | AwxTemplateKind;
 
@@ -24,7 +26,7 @@ export default function AdminServicesPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
-  const [toast, setToast] = useState<{ id: number; message: string; tone: 'info' | 'error' } | null>(null);
+  const { toast, notify, dismiss } = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -47,16 +49,6 @@ export default function AdminServicesPage() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), 4200);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
-
-  const notify = (message: string, tone: 'info' | 'error' = 'info') => {
-    setToast({ id: Date.now(), message, tone });
-  };
 
   const counts = useMemo(() => ({
     total: items.length,
@@ -211,27 +203,7 @@ export default function AdminServicesPage() {
         </p>
       </div>
 
-      {toast && (
-        <div
-          key={toast.id}
-          role="status"
-          aria-live="polite"
-          className="fixed bottom-6 right-4 md:right-8 z-50 max-w-sm p-3.5 rounded-xl bg-foreground-950 text-background-50 shadow-lg flex items-start gap-2.5"
-        >
-          <span className={`w-5 h-5 flex items-center justify-center shrink-0 ${toast.tone === 'error' ? 'text-accent-400' : 'text-primary-300'}`}>
-            <i className={toast.tone === 'error' ? 'ri-error-warning-line' : 'ri-information-line'} aria-hidden="true" />
-          </span>
-          <p className="text-sm">{toast.message}</p>
-          <button
-            type="button"
-            onClick={() => setToast(null)}
-            aria-label={t('admin_close')}
-            className="ml-1 w-5 h-5 flex items-center justify-center shrink-0 text-background-300 hover:text-background-50 cursor-pointer"
-          >
-            <i className="ri-close-line" />
-          </button>
-        </div>
-      )}
+      <Toast toast={toast} onClose={dismiss} />
     </AppShell>
   );
 }

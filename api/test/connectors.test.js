@@ -21,7 +21,7 @@ test.before(async () => {
     res.end();
   });
   await new Promise((resolve) => { target.listen(0, '127.0.0.1', resolve); });
-  base = `http://127.0.0.1:${target.address().port}`;
+  base = `http://127.0.0.1:${/** @type {import('node:net').AddressInfo} */ (target.address()).port}`;
 });
 
 test.after(async () => {

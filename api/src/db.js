@@ -30,6 +30,9 @@ pool.on('error', (err) => {
 /**
  * Exécute une requête paramétrée. Le pool ne doit jamais être exposé
  * au navigateur : l'API est le seul client de PostgreSQL.
+ * @param {string} text
+ * @param {unknown[]} [params]
+ * @returns {Promise<import('pg').QueryResult<any>>}
  */
 async function q(text, params = []) {
   const started = Date.now();
@@ -40,6 +43,11 @@ async function q(text, params = []) {
   return res;
 }
 
+/**
+ * @template T
+ * @param {(client: import('pg').PoolClient) => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
 async function withTransaction(fn) {
   const client = await pool.connect();
   try {

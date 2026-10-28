@@ -8,7 +8,7 @@ import RequestSummary from '@/pages/service/components/RequestSummary';
 import { ErrorBlock, LoadingBlock } from '@/components/base/DataState';
 import { api, ApiError } from '@/utils/api';
 import { tx } from '@/utils/catalog';
-import { loadStore, projectIconOf, useStore } from '@/utils/store';
+import { loadStore, useStore } from '@/utils/store';
 import type { FieldValue, ServiceItem, UniversalFormSchema } from '@/types/catalog';
 import type { AwxLaunchResult, RequestItem } from '@/utils/executions';
 

@@ -1,4 +1,6 @@
-const de = {
+import type { Translations } from '../fr/common';
+
+const de: Translations = {
   nav_catalog: 'Katalog',
   nav_requests: 'Meine Anfragen',
   nav_dashboard: 'Dashboard',

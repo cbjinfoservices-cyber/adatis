@@ -62,12 +62,11 @@ const isForbiddenAddress = (address) => {
 
 /** Résolution DNS qui refuse les adresses interdites (vérifiée à la connexion). */
 const guardedLookup = (hostname, options, callback) => {
-  dns.lookup(hostname, { ...options, all: true }, (err, addresses) => {
+  dns.lookup(hostname, { ...options, all: true }, (err, /** @type {import('node:dns').LookupAddress[]} */ addresses) => {
     if (err) return callback(err);
     const forbidden = addresses.find((entry) => isForbiddenAddress(entry.address));
     if (forbidden) {
-      const error = new Error(`adresse ${forbidden.address} interdite`);
-      error.code = 'EADDRFORBIDDEN';
+      const error = Object.assign(new Error(`adresse ${forbidden.address} interdite`), { code: 'EADDRFORBIDDEN' });
       return callback(error);
     }
     if (options?.all) return callback(null, addresses);

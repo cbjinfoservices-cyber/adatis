@@ -1,5 +1,5 @@
 import type { AdapterItem } from '@/utils/store';
-import { csvCell } from '@/utils/csv';
+import { toCsv } from '@/utils/csv';
 
 export interface AdapterCsvLabels {
   name: string;
@@ -14,18 +14,15 @@ export const adaptersToCsv = (
   adapters: AdapterItem[],
   countOf: (kind: string) => number,
   labels: AdapterCsvLabels,
-) => {
-  const lines = [
-    [labels.name, labels.kind, labels.connectors, labels.descFr, labels.descEn],
-    ...adapters.map((adapter) => [
-      adapter.name,
-      adapter.kind,
-      String(countOf(adapter.kind)),
-      adapter.description?.fr || '',
-      adapter.description?.en || '',
-    ]),
-  ];
-  return lines.map((row) => row.map(csvCell).join(';')).join('\r\n');
-};
+) => toCsv([
+  [labels.name, labels.kind, labels.connectors, labels.descFr, labels.descEn],
+  ...adapters.map((adapter) => [
+    adapter.name,
+    adapter.kind,
+    String(countOf(adapter.kind)),
+    adapter.description?.fr || '',
+    adapter.description?.en || '',
+  ]),
+]);
 
 export const adaptersCsvFileName = () => `adaptateurs-${new Date().toISOString().slice(0, 10)}.csv`;

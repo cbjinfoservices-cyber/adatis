@@ -18,6 +18,8 @@ import {
   resolveActiveBranding, saveTenantBranding, setActiveTenantId, verifyTenantDomain,
   type TenantBranding,
 } from '@/utils/branding';
+import Toast from '@/components/base/Toast';
+import useToast from '@/hooks/useToast';
 
 export default function BrandingPage() {
   const { t } = useTranslation();
@@ -26,14 +28,8 @@ export default function BrandingPage() {
   const [activeId, setActiveId] = useState(() => getActiveTenantId());
   const [edits, setEdits] = useState<Partial<TenantBranding>>({});
   const [busy, setBusy] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const { toast, notify, dismiss } = useToast();
   const [previewOpen, setPreviewOpen] = useState(false);
-
-  useEffect(() => {
-    if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), 4200);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
 
   const saved = useMemo(() => resolveActiveBranding(tenants, activeId), [tenants, activeId]);
   const draft = useMemo(() => ({ ...saved, ...edits }), [saved, edits]);
@@ -80,10 +76,10 @@ export default function BrandingPage() {
       setActiveTenantId(updated.id);
       applyPalette(updated.palette);
       notifyBrandingUpdated();
-      setToast(t('brand_saved', { tenant: updated.name }));
+      notify(t('brand_saved', { tenant: updated.name }));
     } catch (err) {
       const code = err instanceof ApiError ? (err.detail as { error?: string } | null)?.error : '';
-      setToast(code === 'organization_taken' ? t('brand_awx_org_taken') : t('brand_save_error'));
+      notify(code === 'organization_taken' ? t('brand_awx_org_taken') : t('brand_save_error'), 'error');
     } finally {
       setBusy(false);
     }
@@ -97,11 +93,11 @@ export default function BrandingPage() {
       replaceTenant(fresh);
       applyPalette(fresh.palette);
       notifyBrandingUpdated();
-      setToast(t('brand_reset_done'));
+      notify(t('brand_reset_done'));
     } catch {
       setEdits({});
       applyPalette(saved.palette);
-      setToast(t('brand_reset_error'));
+      notify(t('brand_reset_error'), 'error');
     } finally {
       setBusy(false);
     }
@@ -120,16 +116,6 @@ export default function BrandingPage() {
 
   const failed = failedResources.includes('tenants') || status === 'error';
   const loading = (status === 'loading' || status === 'idle') && tenants.length === 0;
-
-  const toastNode = toast && (
-    <div className="fixed bottom-6 right-4 md:right-8 z-50 max-w-sm p-3.5 rounded-xl bg-foreground-950 text-background-50 shadow-lg flex items-start gap-2.5">
-      <span className="w-5 h-5 flex items-center justify-center text-primary-300 shrink-0"><i className="ri-information-line" /></span>
-      <p className="text-sm">{toast}</p>
-      <button type="button" onClick={() => setToast(null)} aria-label={t('admin_close')} className="ml-2 w-5 h-5 flex items-center justify-center text-background-300 hover:text-background-50 cursor-pointer">
-        <i className="ri-close-line" />
-      </button>
-    </div>
-  );
 
   return (
     <AppShell>
@@ -249,21 +235,21 @@ export default function BrandingPage() {
                   branding={draft}
                   readOnly={readOnly}
                   onChange={patch}
-                  onNotify={(message) => setToast(message)}
+                  onNotify={notify}
                 />
                 <PalettePicker value={draft.palette} readOnly={readOnly} onChange={choosePalette} />
                 <DomainSettings
                   branding={draft}
                   readOnly={readOnly}
                   onChange={patch}
-                  onNotify={(message) => setToast(message)}
+                  onNotify={notify}
                   onVerify={verifyDomain}
                 />
                 <EmailSettings
                   branding={draft}
                   readOnly={readOnly}
                   onChange={patch}
-                  onNotify={(message) => setToast(message)}
+                  onNotify={notify}
                 />
               </div>
 
@@ -296,7 +282,7 @@ export default function BrandingPage() {
       </div>
 
       {previewOpen && draft.id && <UserPreview branding={draft} onClose={() => setPreviewOpen(false)} />}
-      {toastNode}
+      <Toast toast={toast} onClose={dismiss} />
     </AppShell>
   );
 }

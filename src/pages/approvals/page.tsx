@@ -9,6 +9,8 @@ import { api, ApiError } from '@/utils/api';
 import { loadStore, reloadStore, useStore } from '@/utils/store';
 import { hoursLeft, isUrgent } from '@/utils/approvals';
 import { getRequest } from '@/utils/executions';
+import Toast from '@/components/base/Toast';
+import useToast from '@/hooks/useToast';
 
 type Tab = 'mine' | 'pending' | 'decided';
 
@@ -18,17 +20,11 @@ export default function ApprovalsPage() {
   const [tab, setTab] = useState<Tab>('mine');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [deciding, setDeciding] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const { toast, notify, dismiss } = useToast();
 
   useEffect(() => {
     loadStore();
   }, []);
-
-  useEffect(() => {
-    if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), 4000);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
 
   const items = approvals;
 
@@ -56,14 +52,14 @@ export default function ApprovalsPage() {
         comment: reason || '',
       });
       await reloadStore();
-      setToast(kind === 'approve'
+      notify(kind === 'approve'
         ? t('appr_toast_approved', { ref: ref?.requestId || id })
-        : t('appr_toast_rejected', { ref: ref?.requestId || id }));
+        : t('appr_toast_rejected', { ref: ref?.requestId || id }), 'success');
     } catch (err) {
       const code = err instanceof ApiError ? (err.detail as { error?: string } | null)?.error : '';
-      if (code === 'self_approval_forbidden') setToast(t('appr_self_forbidden'));
-      else if (code === 'approval_already_decided') setToast(t('appr_already_decided'));
-      else setToast(t('data_error_title'));
+      if (code === 'self_approval_forbidden') notify(t('appr_self_forbidden'), 'error');
+      else if (code === 'approval_already_decided') notify(t('appr_already_decided'), 'error');
+      else notify(t('data_error_title'), 'error');
     } finally {
       setDeciding(false);
     }
@@ -174,15 +170,7 @@ export default function ApprovalsPage() {
         <DecisionAuditLog entries={audit} />
       </div>
 
-      {toast && (
-        <div className="fixed bottom-6 right-4 md:right-8 z-50 max-w-sm p-3.5 rounded-xl bg-foreground-950 text-background-50 shadow-lg flex items-start gap-2.5">
-          <span className="w-5 h-5 flex items-center justify-center text-primary-300 shrink-0"><i className="ri-checkbox-circle-fill" /></span>
-          <p className="text-sm">{toast}</p>
-          <button type="button" onClick={() => setToast(null)} aria-label={t('appr_close')} className="ml-2 w-5 h-5 flex items-center justify-center text-background-300 hover:text-background-50 cursor-pointer">
-            <i className="ri-close-line" />
-          </button>
-        </div>
-      )}
+      <Toast toast={toast} onClose={dismiss} />
     </AppShell>
   );
 }

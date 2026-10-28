@@ -4,7 +4,6 @@ dist/
 *.log
 .env
 .env.*
-auto-imports.d.ts
 *.tsbuildinfo
 .pgdata*/
 e2e-output/

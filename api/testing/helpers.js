@@ -12,7 +12,7 @@ const DB_DIR = path.join(__dirname, '..', '..', 'db');
 const freePort = () => new Promise((resolve, reject) => {
   const srv = net.createServer();
   srv.listen(0, '127.0.0.1', () => {
-    const { port } = srv.address();
+    const { port } = /** @type {import('node:net').AddressInfo} */ (srv.address());
     srv.close(() => resolve(port));
   });
   srv.on('error', reject);
@@ -62,9 +62,14 @@ async function startStack(env = {}) {
   const http = await new Promise((resolve) => {
     const srv = app.listen(0, '127.0.0.1', () => resolve(srv));
   });
-  const base = `http://127.0.0.1:${http.address().port}`;
+  const base = `http://127.0.0.1:${/** @type {import('node:net').AddressInfo} */ (http.address()).port}`;
 
-  /** Appel JSON, avec le cookie de session éventuel. */
+  /**
+   * Appel JSON, avec le cookie de session éventuel.
+   * @param {string} method
+   * @param {string} url
+   * @param {{ cookie?: string, body?: unknown }} [options]
+   */
   const call = async (method, url, { cookie, body } = {}) => {
     const response = await fetch(`${base}${url}`, {
       method,

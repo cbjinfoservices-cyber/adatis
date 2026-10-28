@@ -13,6 +13,9 @@ lancé avec le jeton de l'utilisateur.
 | `deploy/` | Manifestes Kubernetes et `deploy.sh` (voir `deploy/README.md`) |
 | `scripts/`| `dev-local.mjs` : toute la pile en local, sans Docker |
 
+Pour faire évoluer le code (ajouter une page, une route, une migration, une
+traduction) : [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Démarrer en local
 
 Prérequis : Node.js 22 ou plus. Ni Docker ni PostgreSQL ne sont nécessaires.
@@ -37,10 +40,13 @@ change l'utilisateur connecté.
 ## Vérifications
 
 ```sh
-npm run type-check && npm run lint && npm run build   # front
-npm run test:api                                      # API
-npm run build && npm run test:e2e                     # navigateur (Chromium)
+npm run check                       # types, lint, tests unitaires (front + API)
+npm run build && npm run test:e2e   # navigateur (Chromium)
 ```
+
+`check` enchaîne : types du front (TypeScript strict, traductions comprises),
+lint, tests unitaires du front (Vitest, `src/utils/__tests__/`), types de
+l'API (JavaScript vérifié via JSDoc) et tests de l'API.
 
 `test:e2e` (Playwright, `npx playwright install chromium` la première fois)
 sert le build de production avec la CSP de `deploy/nginx.conf`, se connecte en

@@ -42,7 +42,10 @@ const digest = (prevHash, entry) => crypto.createHash('sha256').update(JSON.stri
 
 const toStdout = () => String(process.env.AUDIT_STDOUT || 'true').toLowerCase() !== 'false';
 
-/** Ajoute une entrée. Ne lève jamais : un échec est signalé dans les journaux. */
+/**
+ * Ajoute une entrée. Ne lève jamais : un échec est signalé dans les journaux.
+ * @param {{ req?: any, action: string, actor?: any, target?: string, status?: number, detail?: object }} entry
+ */
 const record = async ({
   req, action, actor, target = '', status = 0, detail = {},
 }) => {
@@ -126,7 +129,11 @@ const row = (r) => ({
   detail: r.detail,
 });
 
-/** Dernières entrées, les plus récentes d'abord (pagination par `before`). */
+/**
+ * Dernières entrées, les plus récentes d'abord (pagination par `before`).
+ * Valeurs brutes acceptées (paramètres de requête HTTP), converties ici.
+ * @param {{ limit?: unknown, before?: unknown }} [options]
+ */
 const list = async ({ limit = 100, before } = {}) => {
   const params = [];
   let where = '';

@@ -143,7 +143,7 @@ function startMockAscender(port = 0) {
 
   return new Promise((resolve) => {
     server.listen(port, '127.0.0.1', () => {
-      const { port } = server.address();
+      const { port } = /** @type {import('node:net').AddressInfo} */ (server.address());
       resolve({
         url: `http://127.0.0.1:${port}`,
         state,

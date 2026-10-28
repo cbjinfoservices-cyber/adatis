@@ -9,8 +9,10 @@ import DeleteAdapterModal from '@/pages/admin/adapters/components/DeleteAdapterM
 import type { AdapterDraft } from '@/pages/admin/adapters/components/adapterDraft';
 import { api, ApiError } from '@/utils/api';
 import { loadStore, patchStore, reloadStore, useStore, type AdapterItem } from '@/utils/store';
-import { downloadCsv } from '@/utils/connectors';
+import { downloadCsv } from '@/utils/download';
 import { adaptersCsvFileName, adaptersToCsv } from '@/utils/adaptersCsv';
+import Toast from '@/components/base/Toast';
+import useToast from '@/hooks/useToast';
 
 const sortAdapters = (items: AdapterItem[]) =>
   [...items].sort((a, b) => a.name.localeCompare(b.name));
@@ -22,19 +24,12 @@ export default function AdaptersPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<AdapterItem | null>(null);
   const [pendingDelete, setPendingDelete] = useState<AdapterItem | null>(null);
-  const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
+  const { toast, notify, dismiss } = useToast();
 
   useEffect(() => {
     loadStore();
   }, []);
 
-  useEffect(() => {
-    if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), 4200);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
-
-  const notify = (message: string) => setToast({ id: Date.now(), message });
 
   const usage = useMemo(() => {
     const map = new Map<string, number>();
@@ -274,20 +269,7 @@ export default function AdaptersPage() {
         onConfirm={deleteAdapter}
       />
 
-      {toast && (
-        <div
-          key={toast.id}
-          role="status"
-          aria-live="polite"
-          className="fixed bottom-6 right-4 md:right-8 z-50 max-w-sm p-3.5 rounded-xl bg-foreground-950 text-background-50 shadow-lg flex items-start gap-2.5"
-        >
-          <span className="w-5 h-5 flex items-center justify-center text-primary-300 shrink-0"><i className="ri-information-line" /></span>
-          <p className="text-sm">{toast.message}</p>
-          <button type="button" onClick={() => setToast(null)} aria-label={t('adapt_close')} className="ml-1 w-5 h-5 flex items-center justify-center shrink-0 text-background-300 hover:text-background-50 cursor-pointer">
-            <i className="ri-close-line" />
-          </button>
-        </div>
-      )}
+      <Toast toast={toast} onClose={dismiss} />
     </AppShell>
   );
 }

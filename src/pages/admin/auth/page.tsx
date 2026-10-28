@@ -16,8 +16,8 @@ import AuthIdentityCard from '@/pages/admin/auth/components/AuthIdentityCard';
 import AuthMappingsCard from '@/pages/admin/auth/components/AuthMappingsCard';
 import AuthEventsCard from '@/pages/admin/auth/components/AuthEventsCard';
 import AuthSessionsCard from '@/pages/admin/auth/components/AuthSessionsCard';
-
-type Toast = { id: number; message: string; tone: 'info' | 'error' };
+import Toast from '@/components/base/Toast';
+import useToast from '@/hooks/useToast';
 
 export default function AuthAdminPage() {
   const { t } = useTranslation();
@@ -38,17 +38,7 @@ export default function AuthAdminPage() {
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshState, setRefreshState] = useState<'idle' | 'ok' | 'error'>('idle');
-  const [toast, setToast] = useState<Toast | null>(null);
-
-  useEffect(() => {
-    if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), 4200);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
-
-  const notify = (message: string, tone: 'info' | 'error' = 'info') => {
-    setToast({ id: Date.now(), message, tone });
-  };
+  const { toast, notify, dismiss } = useToast();
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -234,27 +224,7 @@ export default function AuthAdminPage() {
         )}
       </div>
 
-      {toast && (
-        <div
-          key={toast.id}
-          role="status"
-          aria-live="polite"
-          className="fixed bottom-6 right-4 md:right-8 z-50 max-w-sm p-3.5 rounded-xl bg-foreground-950 text-background-50 shadow-lg flex items-start gap-2.5"
-        >
-          <span className={`w-5 h-5 flex items-center justify-center shrink-0 ${toast.tone === 'error' ? 'text-accent-400' : 'text-primary-300'}`}>
-            <i className={toast.tone === 'error' ? 'ri-error-warning-line' : 'ri-information-line'} />
-          </span>
-          <p className="text-sm">{toast.message}</p>
-          <button
-            type="button"
-            onClick={() => setToast(null)}
-            aria-label={t('adapt_close')}
-            className="ml-1 w-5 h-5 flex items-center justify-center shrink-0 text-background-300 hover:text-background-50 cursor-pointer"
-          >
-            <i className="ri-close-line" />
-          </button>
-        </div>
-      )}
+      <Toast toast={toast} onClose={dismiss} />
     </AppShell>
   );
 }

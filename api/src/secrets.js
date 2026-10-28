@@ -76,6 +76,7 @@ const encrypt = (plain) => {
   return `${V2}${keyId(key)}:${iv.toString('base64')}:${cipher.getAuthTag().toString('base64')}:${data.toString('base64')}`;
 };
 
+/** @param {Buffer} key @param {string[]} parts iv, tag et données, en base64 */
 const openWith = (key, [iv, tag, data]) => {
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'));
   decipher.setAuthTag(Buffer.from(tag, 'base64'));

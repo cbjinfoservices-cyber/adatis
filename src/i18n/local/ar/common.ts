@@ -1,4 +1,6 @@
-const ar = {
+import type { Translations } from '../fr/common';
+
+const ar: Translations = {
   nav_catalog: 'الكتالوج',
   nav_requests: 'طلباتي',
   nav_dashboard: 'لوحة التحكم',

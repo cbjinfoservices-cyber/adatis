@@ -74,9 +74,7 @@ const postForm = async (url, form, clientId, clientSecret) => {
 
   if (!response.ok) {
     const detail = payload?.error_description || payload?.error || payload?.detail || text.slice(0, 200);
-    const error = new Error(`Ascender a refusé la requête OAuth (${response.status}) : ${detail || 'sans détail'}`);
-    error.status = response.status;
-    error.awx = payload;
+    const error = Object.assign(new Error(`Ascender a refusé la requête OAuth (${response.status}) : ${detail || 'sans détail'}`), { status: response.status, awx: payload });
     throw error;
   }
   return payload || {};
@@ -121,7 +119,12 @@ const refreshAccessToken = async (refreshToken) => {
   );
 };
 
-/** Appel authentifié générique à l'API AWX. */
+/**
+ * Appel authentifié générique à l'API AWX.
+ * @param {string} path
+ * @param {string} accessToken
+ * @param {{ method?: string, body?: string }} [options]
+ */
 const apiRequest = async (path, accessToken, { method = 'GET', body } = {}) => {
   const config = readConfig();
   const response = await fetch(`${config.baseUrl}${path}`, {
@@ -143,9 +146,7 @@ const apiRequest = async (path, accessToken, { method = 'GET', body } = {}) => {
   }
   if (!response.ok) {
     const detail = payload?.detail || payload?.error || text.slice(0, 200);
-    const error = new Error(`Ascender a répondu ${response.status} sur ${path}${detail ? ` : ${detail}` : ''}`);
-    error.status = response.status;
-    error.awx = payload;
+    const error = Object.assign(new Error(`Ascender a répondu ${response.status} sur ${path}${detail ? ` : ${detail}` : ''}`), { status: response.status, awx: payload });
     throw error;
   }
   return payload;
@@ -174,8 +175,7 @@ const ping = async () => {
     payload = null;
   }
   if (!response.ok) {
-    const error = new Error(`Ascender a répondu ${response.status} sur /api/v2/ping/`);
-    error.status = response.status;
+    const error = Object.assign(new Error(`Ascender a répondu ${response.status} sur /api/v2/ping/`), { status: response.status });
     throw error;
   }
   return {
@@ -216,8 +216,7 @@ const launchJobTemplate = async ({
 
   const jobId = Number(payload?.job ?? payload?.id);
   if (!Number.isInteger(jobId) || jobId <= 0) {
-    const error = new Error("Ascender n'a pas renvoyé d'identifiant de job");
-    error.status = 502;
+    const error = Object.assign(new Error("Ascender n'a pas renvoyé d'identifiant de job"), { status: 502 });
     throw error;
   }
   return { jobId, status: String(payload?.status || 'pending') };
@@ -235,8 +234,7 @@ const launchWorkflowTemplate = async ({ templateId, accessToken, extraVars = {} 
 
   const workflowJobId = Number(payload?.workflow_job ?? payload?.id);
   if (!Number.isInteger(workflowJobId) || workflowJobId <= 0) {
-    const error = new Error("Ascender n'a pas renvoyé d'identifiant de workflow");
-    error.status = 502;
+    const error = Object.assign(new Error("Ascender n'a pas renvoyé d'identifiant de workflow"), { status: 502 });
     throw error;
   }
   return { workflowJobId, status: String(payload?.status || 'pending') };
@@ -345,8 +343,7 @@ const fetchJobOutput = async (jobId, accessToken) => {
   });
   const text = await response.text();
   if (!response.ok) {
-    const error = new Error(`Ascender a répondu ${response.status} sur ${path}`);
-    error.status = response.status;
+    const error = Object.assign(new Error(`Ascender a répondu ${response.status} sur ${path}`), { status: response.status });
     throw error;
   }
   const truncated = Buffer.byteLength(text) > OUTPUT_MAX_BYTES;

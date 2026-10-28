@@ -16,7 +16,9 @@ import { useAuth } from '@/hooks/useAuth';
 import { ApiError } from '@/utils/api';
 import { fetchSystemInfo, type SystemInfo, type SystemSettings } from '@/utils/system';
 import { buildDiagnostic, copyToClipboard, migrationsCsvFileName, migrationsToCsv } from '@/utils/systemDiagnostic';
-import { downloadCsv } from '@/utils/connectors';
+import { downloadCsv } from '@/utils/download';
+import Toast from '@/components/base/Toast';
+import useToast from '@/hooks/useToast';
 
 export default function SystemPage() {
   const { t, i18n } = useTranslation();
@@ -29,17 +31,7 @@ export default function SystemPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [copying, setCopying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ id: number; message: string; tone: 'info' | 'error' } | null>(null);
-
-  useEffect(() => {
-    if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), 4200);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
-
-  const notify = (message: string, tone: 'info' | 'error' = 'info') => {
-    setToast({ id: Date.now(), message, tone });
-  };
+  const { toast, notify, dismiss } = useToast();
 
   const load = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
@@ -173,27 +165,7 @@ export default function SystemPage() {
         ) : null}
       </div>
 
-      {toast && (
-        <div
-          key={toast.id}
-          role="status"
-          aria-live="polite"
-          className="fixed bottom-6 right-4 md:right-8 z-50 max-w-sm p-3.5 rounded-xl bg-foreground-950 text-background-50 shadow-lg flex items-start gap-2.5"
-        >
-          <span className={`w-5 h-5 flex items-center justify-center shrink-0 ${toast.tone === 'error' ? 'text-accent-400' : 'text-primary-300'}`}>
-            <i className={toast.tone === 'error' ? 'ri-error-warning-line' : 'ri-information-line'} />
-          </span>
-          <p className="text-sm">{toast.message}</p>
-          <button
-            type="button"
-            onClick={() => setToast(null)}
-            aria-label={t('adapt_close')}
-            className="ml-1 w-5 h-5 flex items-center justify-center shrink-0 text-background-300 hover:text-background-50 cursor-pointer"
-          >
-            <i className="ri-close-line" />
-          </button>
-        </div>
-      )}
+      <Toast toast={toast} onClose={dismiss} />
     </AppShell>
   );
 }

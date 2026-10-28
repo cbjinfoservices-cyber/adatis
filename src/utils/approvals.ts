@@ -56,8 +56,8 @@ export const remainingLevels = (item: ApprovalItem) =>
   item.levels.filter((l) => l.status === 'waiting').length;
 
 /** Heures restantes avant l'échéance (négatif = dépassé). */
-export const hoursLeft = (dueAt: string) => {
-  const diff = new Date(dueAt).getTime() - new Date('2026-10-25T09:00:00').getTime();
+export const hoursLeft = (dueAt: string, now = Date.now()) => {
+  const diff = new Date(dueAt).getTime() - now;
   return Math.round(diff / 3600000);
 };
 

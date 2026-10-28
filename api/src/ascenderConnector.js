@@ -127,8 +127,7 @@ const runTest = async (connectorId) => {
 const syncCatalog = async ({ connectorId, session }) => {
   const token = await ensureAccessToken(session);
   if (!token) {
-    const error = new Error('Jeton Ascender indisponible');
-    error.code = 'ascender_session_required';
+    const error = Object.assign(new Error('Jeton Ascender indisponible'), { code: 'ascender_session_required' });
     throw error;
   }
 

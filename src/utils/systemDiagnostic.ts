@@ -5,7 +5,7 @@ import {
   type SystemInfo,
   type SystemMigration,
 } from '@/utils/system';
-import { csvCell } from '@/utils/csv';
+import { toCsv } from '@/utils/csv';
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -121,7 +121,7 @@ export const migrationsToCsv = (
     migration.version,
     formatDate(migration.applied_at, language),
   ]);
-  return [header, ...rows].map((row) => row.map(csvCell).join(';')).join('\r\n');
+  return toCsv([header, ...rows]);
 };
 
 export const migrationsCsvFileName = () => `migrations-${new Date().toISOString().slice(0, 10)}.csv`;

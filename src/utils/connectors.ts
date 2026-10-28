@@ -1,5 +1,6 @@
 import type { I18nText } from '@/types/catalog';
-import { csvCell } from '@/utils/csv';
+import { toCsv } from '@/utils/csv';
+import { httpUrlIsValid } from '@/utils/url';
 
 export type ConnectorKind =
   | 'ascender' | 'jenkins' | 'terraform' | 'gitlab' | 'azuredevops'
@@ -121,23 +122,22 @@ export const KIND_LABEL: Record<ConnectorKind, string> = {
 
 export const kindLabel = (kind: string) => KIND_LABEL[kind as ConnectorKind] || kind;
 
-export const endpointIsValid = (value: string) => {
-  const raw = value.trim();
-  if (!raw) return false;
-  try {
-    const url = new URL(raw);
-    const okProtocol = url.protocol === 'http:' || url.protocol === 'https:';
-    return okProtocol && url.hostname.includes('.');
-  } catch {
-    return false;
-  }
-};
+export const endpointIsValid = httpUrlIsValid;
 
 export const publishedCount = (connector: Connector) =>
   connector.catalog.filter((c) => c.status === 'mapped').length;
 
 export const reviewCount = (connector: Connector) =>
   connector.catalog.filter((c) => c.status === 'review').length;
+
+/** Indicateurs de la page Connecteurs. */
+export const connectorTotals = (items: Connector[]) => ({
+  connected: items.filter((c) => c.health !== 'pending').length,
+  healthy: items.filter((c) => c.health === 'healthy').length,
+  catalog: items.reduce((acc, c) => acc + c.catalog.length, 0),
+  published: items.reduce((acc, c) => acc + publishedCount(c), 0),
+  jobs: items.reduce((acc, c) => acc + c.jobs24h, 0),
+});
 
 export const latestTest = (connector: Connector): ConnectorTestEntry | null =>
   connector.tests.length > 0 ? connector.tests[0] : null;
@@ -231,7 +231,7 @@ export const testsToCsv = (
       entry.error || '',
     ]),
   ];
-  return lines.map((row) => row.map(csvCell).join(';')).join('\r\n');
+  return toCsv(lines);
 };
 
 export const csvFileName = (connector: Connector) => {
@@ -243,18 +243,6 @@ export const csvFileName = (connector: Connector) => {
     .replace(/^-+|-+$/g, '');
   const day = new Date().toISOString().slice(0, 10);
   return `tests-${slug || 'connecteur'}-${day}.csv`;
-};
-
-export const downloadCsv = (fileName: string, content: string) => {
-  const blob = new Blob([`\ufeff${content}`], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
 };
 
 /* --- Search --- */
@@ -346,18 +334,6 @@ export const configTemplateBundle = (): ConnectorConfigBundle => ({
 });
 
 export const configTemplateFileName = () => 'connecteurs-modele.json';
-
-export const downloadJson = (fileName: string, content: string) => {
-  const blob = new Blob([content], { type: 'application/json;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-};
 
 const isConnectorKind = (value: unknown): value is ConnectorKind =>
   typeof value === 'string' && Object.prototype.hasOwnProperty.call(KIND_ICON, value);

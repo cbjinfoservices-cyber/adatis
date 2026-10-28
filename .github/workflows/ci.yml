@@ -19,7 +19,7 @@ env:
 
 jobs:
   web:
-    name: Front (type-check, lint, build)
+    name: Front (type-check, lint, tests unitaires, build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -32,10 +32,11 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run type-check
       - run: npm run lint
+      - run: npm test
       - run: npm run build
 
   api:
-    name: API (tests sur PostgreSQL PGlite + faux Ascender)
+    name: API (types JSDoc, tests sur PostgreSQL PGlite + faux Ascender)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -50,6 +51,7 @@ jobs:
           cache: npm
           cache-dependency-path: api/package-lock.json
       - run: npm ci --ignore-scripts
+      - run: npm run type-check
       - run: npm test
 
   dependencies:

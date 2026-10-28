@@ -128,6 +128,9 @@ const saveJob = async ({
  * Lancement impossible : la demande passe en échec avec son motif, visible
  * dans le détail et le suivi des jobs. Un éventuel job précédent reste dans
  * l'historique des tentatives.
+ * @param {string} requestId
+ * @param {string} reason
+ * @param {{ template?: any, launchedBy?: string, launcherId?: string }} [launch]
  */
 const markFailed = async (requestId, reason, { template, launchedBy, launcherId } = {}) => {
   const error = String(reason || LAUNCH_FAILED).slice(0, 300);
@@ -308,6 +311,7 @@ const notifyFinished = async (requestId) => {
  * Relit l'état d'un job dans Ascender et aligne la demande, sa tentative
  * courante et, en fin de job, notifie le demandeur. `request` est une ligne
  * de requests (avec estimated_minutes du service si disponible).
+ * @param {{ request?: any, session?: any }} [args]
  */
 const syncRequest = async ({ request, session } = {}) => {
   if (!request?.awx_job_id) return null;

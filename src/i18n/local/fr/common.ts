@@ -1121,4 +1121,8 @@ const fr = {
   awx_track_all_engines: 'Tous les moteurs',
 };
 
+// Référence des clés : chaque autre langue est typée `Translations`, donc une clé
+// manquante ou en trop y devient une erreur de compilation.
+export type Translations = Record<keyof typeof fr, string>;
+
 export default fr;

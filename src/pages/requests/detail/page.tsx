@@ -17,6 +17,8 @@ import { cancelRequestJob, launchRequestJob } from '@/utils/awxJobs';
 import { loadStore, useStore } from '@/utils/store';
 import { ErrorBlock, LoadingBlock } from '@/components/base/DataState';
 import { exportExecutionPdf } from '@/utils/pdf';
+import Toast from '@/components/base/Toast';
+import useToast from '@/hooks/useToast';
 
 /** Relecture de la demande tant que son job tourne (l'API lit la base, tenue à jour en fond). */
 const POLL_MS = 5000;
@@ -40,7 +42,7 @@ export default function RequestDetailPage() {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const { toast, notify, dismiss } = useToast();
   const [awxLaunching, setAwxLaunching] = useState(false);
   const [awxSyncing, setAwxSyncing] = useState(false);
   const [awxCanceling, setAwxCanceling] = useState(false);
@@ -91,12 +93,6 @@ export default function RequestDetailPage() {
     return () => window.clearInterval(timer);
   }, [awxActive, refresh]);
 
-  useEffect(() => {
-    if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), 4200);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
-
   const syncAwx = async () => {
     setAwxSyncing(true);
     setAwxError(null);
@@ -117,7 +113,7 @@ export default function RequestDetailPage() {
       await launchRequestJob(String(id));
       setOutputJobId(null);
       await refresh();
-      setToast(t('awx_job_launched'));
+      notify(t('awx_job_launched'));
     } catch (err) {
       const payload = errorPayload(err);
       const code = payload?.error || '';
@@ -140,7 +136,7 @@ export default function RequestDetailPage() {
     try {
       await cancelRequestJob(String(id));
       await refresh();
-      setToast(t('awx_job_canceled'));
+      notify(t('awx_job_canceled'));
     } catch (err) {
       const code = errorPayload(err)?.error || '';
       setAwxError(t(code === 'rbac_forbidden' ? 'awx_job_no_rbac' : 'awx_job_cancel_failed'));
@@ -261,7 +257,7 @@ export default function RequestDetailPage() {
         },
         fileName,
       });
-      setToast(t('pdf_ready', { file: fileName }));
+      notify(t('pdf_ready', { file: fileName }));
     } finally {
       setExporting(false);
     }
@@ -377,15 +373,7 @@ export default function RequestDetailPage() {
         </div>
       </div>
 
-      {toast && (
-        <div className="fixed bottom-6 right-4 md:right-8 z-50 max-w-sm p-3.5 rounded-xl bg-foreground-950 text-background-50 shadow-lg flex items-start gap-2.5">
-          <span className="w-5 h-5 flex items-center justify-center text-primary-300 shrink-0"><i className="ri-information-line" /></span>
-          <p className="text-sm">{toast}</p>
-          <button type="button" onClick={() => setToast(null)} aria-label={t('admin_close')} className="ml-2 w-5 h-5 flex items-center justify-center text-background-300 hover:text-background-50 cursor-pointer">
-            <i className="ri-close-line" />
-          </button>
-        </div>
-      )}
+      <Toast toast={toast} onClose={dismiss} />
     </AppShell>
   );
 }

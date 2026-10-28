@@ -1,4 +1,5 @@
 import { api } from '@/utils/api';
+import { httpUrlIsValid } from '@/utils/url';
 import type { I18nText } from '@/types/catalog';
 
 export type DomainStatus = 'verified' | 'pending' | 'not_set';
@@ -216,17 +217,7 @@ export const DOMAIN_PATTERN = /^(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/i;
 
 export const domainIsValid = (value: string) => DOMAIN_PATTERN.test(value.trim().toLowerCase());
 
-export const urlIsValid = (value: string) => {
-  const raw = value.trim();
-  if (!raw) return false;
-  try {
-    const parsed = new URL(raw);
-    const okProtocol = parsed.protocol === 'http:' || parsed.protocol === 'https:';
-    return okProtocol && parsed.hostname.includes('.');
-  } catch {
-    return false;
-  }
-};
+export const urlIsValid = httpUrlIsValid;
 
 export const urlHost = (value: string) => {
   try {

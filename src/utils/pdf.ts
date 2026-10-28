@@ -31,7 +31,6 @@ export interface PdfPayload {
 }
 
 const INK: RGB = [22, 26, 32];
-const MUTED: RGB = [112, 120, 130];
 const SOFT: RGB = [130, 138, 148];
 const LINE: RGB = [226, 230, 235];
 const TEAL: RGB = [30, 160, 152];

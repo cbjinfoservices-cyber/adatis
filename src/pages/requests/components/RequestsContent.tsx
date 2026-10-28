@@ -10,6 +10,8 @@ import { api } from '@/utils/api';
 import { ErrorBlock, LoadingBlock } from '@/components/base/DataState';
 import { loadStore, patchStore, reloadStore, useStore } from '@/utils/store';
 import { exportRequestBundlePdf } from '@/utils/pdfBundle';
+import Toast from '@/components/base/Toast';
+import useToast from '@/hooks/useToast';
 
 const TABS: (ExecutionStatus | 'all')[] = ['all', 'queued', 'running', 'success', 'failed', 'canceled'];
 
@@ -22,7 +24,7 @@ export default function RequestsContent() {
   const [query, setQuery] = useState(params.get('q') || '');
   const [selected, setSelected] = useState<string[]>([]);
   const [exporting, setExporting] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const { toast, notify, dismiss } = useToast();
 
   useEffect(() => { loadStore(); }, []);
 
@@ -41,12 +43,6 @@ export default function RequestsContent() {
     }, 15000);
     return () => window.clearInterval(timer);
   }, [hasActiveAwx]);
-
-  useEffect(() => {
-    if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), 4200);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: requests.length };
@@ -147,7 +143,7 @@ export default function RequestsContent() {
         },
         fileName,
       });
-      setToast(t('pdf_bundle_ready', { file: fileName }));
+      notify(t('pdf_bundle_ready', { file: fileName }), 'success');
       setSelected([]);
     } finally {
       setExporting(false);
@@ -291,15 +287,7 @@ export default function RequestsContent() {
         )}
       </div>
 
-      {toast && (
-        <div className="fixed bottom-6 right-4 md:right-8 z-50 max-w-sm p-3.5 rounded-xl bg-foreground-950 text-background-50 shadow-lg flex items-start gap-2.5">
-          <span className="w-5 h-5 flex items-center justify-center text-primary-300 shrink-0"><i className="ri-file-pdf-2-line" /></span>
-          <p className="text-sm">{toast}</p>
-          <button type="button" onClick={() => setToast(null)} aria-label={t('admin_close')} className="ml-2 w-5 h-5 flex items-center justify-center text-background-300 hover:text-background-50 cursor-pointer">
-            <i className="ri-close-line" />
-          </button>
-        </div>
-      )}
+      <Toast toast={toast} onClose={dismiss} />
     </div>
   );
 }

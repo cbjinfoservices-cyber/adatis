@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  KIND_ICON, configEntryMatches, configTemplateBundle, configTemplateFileName, downloadJson, parseConfigBundle,
+  KIND_ICON, configEntryMatches, configTemplateBundle, configTemplateFileName, parseConfigBundle,
   type Connector, type ConnectorConfigEntry, type ImportMatchStrategy,
 } from '@/utils/connectors';
+import { downloadJson } from '@/utils/download';
 
 export default function ImportConnectorsModal({
   open, existing, onClose, onImport, onNotify,

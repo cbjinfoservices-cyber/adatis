@@ -4,7 +4,7 @@ import {
   fetchAuditLog, verifyAuditLog, type AuditEntry, type AuditVerification,
 } from '@/utils/auth';
 import { toCsv } from '@/utils/csv';
-import { downloadCsv } from '@/utils/connectors';
+import { downloadCsv } from '@/utils/download';
 
 const statusTone = (status: number) => {
   if (status >= 500) return 'bg-accent-100 text-accent-800';

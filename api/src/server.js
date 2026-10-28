@@ -1,8 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const compression = require('compression');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
+const helmet = require('helmet').default;
+const { rateLimit } = require('express-rate-limit');
 const { q } = require('./db');
 const { startProbing } = require('./healthMonitor');
 const { startJobMonitor } = require('./jobMonitor');
@@ -15,6 +15,9 @@ const { configProblems, originGuard, noStore } = require('./security');
 const authRoutes = require('./routes/auth');
 const catalogRoutes = require('./routes/catalog');
 const requestRoutes = require('./routes/requests');
+const requestJobRoutes = require('./routes/requestJobs');
+const jobRoutes = require('./routes/jobs');
+const dashboardRoutes = require('./routes/dashboard');
 const approvalRoutes = require('./routes/approvals');
 const connectorRoutes = require('./routes/connectors');
 const adapterRoutes = require('./routes/adapters');
@@ -106,6 +109,9 @@ app.use('/api', (req, res, next) => {
 
 app.use('/api', catalogRoutes);
 app.use('/api', requestRoutes);
+app.use('/api', requestJobRoutes);
+app.use('/api', jobRoutes);
+app.use('/api', dashboardRoutes);
 app.use('/api', approvalRoutes);
 app.use('/api', connectorRoutes);
 app.use('/api', adapterRoutes);
