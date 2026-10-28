@@ -7,6 +7,11 @@
 #   BASE_PATH=/portal/ ./scripts/package.sh
 #   PLATFORM=linux/arm64 ./scripts/package.sh   # nœuds ARM (défaut : linux/amd64)
 #   BUNDLE_K3S=false ./scripts/package.sh       # sans k3s (cluster existant uniquement)
+#   BUILD_CA_CERT=ca.pem ./scripts/package.sh   # proxy / antivirus qui intercepte le HTTPS
+#
+# BUILD_CA_CERT : autorité (PEM) à laquelle faire confiance pendant le build
+# des images (npm, apk). Transmise comme secret BuildKit : elle n'est écrite
+# dans aucune couche, les images livrées ne la contiennent pas.
 #
 # Le package contient les images (API, frontend, PostgreSQL, busybox) en .tar,
 # les manifestes deploy/k8s, deploy.sh, les scripts SQL et install.sh qui
@@ -62,15 +67,25 @@ STAGE="${OUT_DIR}/${NAME}"
 API_IMAGE="asp-api:${TAG}"
 WEB_IMAGE="asp-web:${TAG}"
 
+BUILD_SECRET=()
+if [ -n "${BUILD_CA_CERT:-}" ]; then
+  [ -f "${BUILD_CA_CERT}" ] || fail "BUILD_CA_CERT : fichier introuvable (${BUILD_CA_CERT})"
+  grep -q "BEGIN CERTIFICATE" "${BUILD_CA_CERT}" || fail "BUILD_CA_CERT : certificat PEM attendu"
+  # Docker Desktop (Windows) attend un chemin Windows.
+  CA_SRC="$(cygpath -w "${BUILD_CA_CERT}" 2>/dev/null || echo "${BUILD_CA_CERT}")"
+  BUILD_SECRET=(--secret "id=build_ca,src=${CA_SRC}")
+  warn "Autorité supplémentaire pour le build : ${BUILD_CA_CERT} (absente des images livrées)"
+fi
+
 rm -rf "${STAGE}"
 mkdir -p "${STAGE}/images"
 
 log "Construction de l'image API (${API_IMAGE})"
-docker build --platform "${PLATFORM}" -t "${API_IMAGE}" -f "${ROOT_DIR}/api/Dockerfile" "${ROOT_DIR}/api"
+docker build "${BUILD_SECRET[@]}" --platform "${PLATFORM}" -t "${API_IMAGE}" -f "${ROOT_DIR}/api/Dockerfile" "${ROOT_DIR}/api"
 
 log "Construction de l'image frontend (${WEB_IMAGE}) — BASE_PATH=${BASE_PATH}"
 # Git Bash (Windows) convertirait BASE_PATH=/ en chemin Windows.
-MSYS2_ARG_CONV_EXCL="BASE_PATH=" docker build --platform "${PLATFORM}" --build-arg "BASE_PATH=${BASE_PATH}" -t "${WEB_IMAGE}" -f "${ROOT_DIR}/Dockerfile" "${ROOT_DIR}"
+MSYS2_ARG_CONV_EXCL="BASE_PATH=" docker build "${BUILD_SECRET[@]}" --platform "${PLATFORM}" --build-arg "BASE_PATH=${BASE_PATH}" -t "${WEB_IMAGE}" -f "${ROOT_DIR}/Dockerfile" "${ROOT_DIR}"
 
 for pin in "${POSTGRES_PIN}" "${BUSYBOX_PIN}"; do
   log "Récupération de ${pin}"

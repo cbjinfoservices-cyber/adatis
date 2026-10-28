@@ -10,7 +10,12 @@ ENV NODE_ENV=development
 
 COPY package.json package-lock.json ./
 # --ignore-scripts : aucun script d'installation de dépendance n'est exécuté.
-RUN npm ci --ignore-scripts --no-audit --no-fund
+# Secret build_ca (optionnel, BUILD_CA_CERT de scripts/package.sh) : autorité
+# d'un proxy ou antivirus qui intercepte le HTTPS, montée le temps de la
+# commande et jamais écrite dans l'image.
+RUN --mount=type=secret,id=build_ca,required=false \
+  if [ -f /run/secrets/build_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/build_ca; fi; \
+  npm ci --ignore-scripts --no-audit --no-fund
 
 COPY . .
 
@@ -22,7 +27,12 @@ RUN npm run build
 # --- Étape 2 : serveur statique, sans root (UID 101, port 8080) ---
 FROM ${NGINX_IMAGE}
 USER root
-RUN apk upgrade --no-cache
+RUN --mount=type=secret,id=build_ca,required=false \
+  if [ -f /run/secrets/build_ca ]; then \
+    cat /etc/ssl/certs/ca-certificates.crt /run/secrets/build_ca > /tmp/build-ca.pem; \
+    export SSL_CERT_FILE=/tmp/build-ca.pem; \
+  fi; \
+  apk upgrade --no-cache && rm -f /tmp/build-ca.pem
 COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/out /usr/share/nginx/html
 USER 101
