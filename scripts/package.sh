@@ -8,6 +8,8 @@
 #   PLATFORM=linux/arm64 ./scripts/package.sh   # nœuds ARM (défaut : linux/amd64)
 #   BUNDLE_K3S=false ./scripts/package.sh       # sans k3s (cluster existant uniquement)
 #   BUILD_CA_CERT=ca.pem ./scripts/package.sh   # proxy / antivirus qui intercepte le HTTPS
+#   COSIGN_KEY=cosign.key npm run package       # signature obligatoire en production
+#   ALLOW_UNSIGNED=true npm run package         # uniquement pour les builds de test
 #
 # BUILD_CA_CERT : autorité (PEM) à laquelle faire confiance pendant le build
 # des images (npm, apk). Transmise comme secret BuildKit : elle n'est écrite
@@ -21,7 +23,7 @@
 # Il embarque aussi k3s (binaire + images hors ligne, Traefik compris) : sur
 # une VM Linux vierge, install.sh installe le cluster.
 #
-# Prérequis : docker, tar, gzip, curl, sha256sum.
+# Prérequis : docker, tar, gzip, curl, sha256sum, cosign (sauf build de test).
 # =============================================================================
 set -euo pipefail
 
@@ -40,12 +42,23 @@ K3S_VERSION="${K3S_VERSION:-v1.36.5+k3s1}"
 # Script d'installation (exécuté en root sur la VM) : absent des empreintes de
 # la release, donc épinglé ici. À mettre à jour avec K3S_VERSION.
 K3S_INSTALL_SH_SHA256="${K3S_INSTALL_SH_SHA256:-46177d4c99440b4c0311b67233823a8e8a2fc09693f6c89af1a7161e152fbfad}"
+ALLOW_UNSIGNED="${ALLOW_UNSIGNED:-false}"
 
 C_RESET='\033[0m'; C_INFO='\033[0;36m'; C_OK='\033[0;32m'; C_WARN='\033[0;33m'; C_ERR='\033[0;31m'
 log()  { printf "${C_INFO}▸ %s${C_RESET}\n" "$*"; }
 ok()   { printf "${C_OK}✔ %s${C_RESET}\n" "$*"; }
 warn() { printf "${C_WARN}! %s${C_RESET}\n" "$*"; }
 fail() { printf "${C_ERR}✖ %s${C_RESET}\n" "$*" >&2; exit 1; }
+
+if [ "${ALLOW_UNSIGNED}" = true ] && [ -n "${COSIGN_KEY:-}" ]; then
+  fail "Choisir COSIGN_KEY ou ALLOW_UNSIGNED=true, pas les deux"
+fi
+if [ -z "${COSIGN_KEY:-}" ] && [ "${ALLOW_UNSIGNED}" != true ]; then
+  fail "Signature obligatoire pour un package de production : définir COSIGN_KEY (ALLOW_UNSIGNED=true réservé aux tests)"
+fi
+if [ -n "${COSIGN_KEY:-}" ]; then
+  command -v cosign >/dev/null 2>&1 || fail "COSIGN_KEY fourni mais cosign est introuvable"
+fi
 
 command -v docker >/dev/null 2>&1 || fail "docker est introuvable"
 docker info >/dev/null 2>&1 || fail "le démon Docker ne répond pas"
@@ -60,6 +73,7 @@ if [ -z "${TAG:-}" ]; then
     warn "Modifications non commitées : elles sont incluses (version ${TAG})"
   fi
 fi
+[[ "${TAG}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fail "TAG invalide : seuls lettres, chiffres, point, tiret et underscore sont acceptés"
 
 NAME="asp-portal-${TAG}"
 OUT_DIR="${ROOT_DIR}/dist"
@@ -166,19 +180,18 @@ rm -rf "${STAGE}"
 # Signature de l'archive (cosign) : prouve sa provenance, au-delà de
 # l'intégrité. COSIGN_KEY = clé privée cosign (fichier ou KMS).
 if [ -n "${COSIGN_KEY:-}" ]; then
-  command -v cosign >/dev/null 2>&1 || fail "COSIGN_KEY fourni mais cosign est introuvable"
   log "Signature de l'archive (cosign)"
-  cosign sign-blob --yes --key "${COSIGN_KEY}" --output-signature "${OUT_DIR}/${NAME}.tar.gz.sig" \
+  cosign sign-blob --yes --key "${COSIGN_KEY}" --bundle "${OUT_DIR}/${NAME}.tar.gz.sigstore.json" \
     "${OUT_DIR}/${NAME}.tar.gz" >/dev/null
-  ok "Signature : dist/${NAME}.tar.gz.sig"
+  ok "Signature : dist/${NAME}.tar.gz.sigstore.json"
 else
-  warn "COSIGN_KEY absent : archive non signée (empreinte seule : dist/${NAME}.tar.gz.sha256)"
+  warn "ALLOW_UNSIGNED=true : build de test non signé"
 fi
 
 ok "Package prêt : dist/${NAME}.tar.gz ($(du -h "${OUT_DIR}/${NAME}.tar.gz" | cut -f1))"
 printf "  Sur la machine de production :\n"
 if [ -n "${COSIGN_KEY:-}" ]; then
-  printf "    cosign verify-blob --key cosign.pub --signature %s.tar.gz.sig %s.tar.gz\n" "${NAME}" "${NAME}"
+  printf "    cosign verify-blob --key cosign.pub --bundle %s.tar.gz.sigstore.json %s.tar.gz\n" "${NAME}" "${NAME}"
 else
   printf "    sha256sum -c %s.tar.gz.sha256\n" "${NAME}"
 fi

@@ -148,8 +148,10 @@ Le certificat serveur PostgreSQL (2 ans) est renouvelé automatiquement par
 | Mises à jour | Dependabot (délai de 14 jours) | revue |
 
 Actions GitHub épinglées par SHA de commit, jeton CI en lecture seule.
-Le paquet hors-ligne est vérifié par `SHA256SUMS` et peut être signé avec
-cosign (`COSIGN_KEY=… npm run package`).
+Les packages de production doivent être signés avec Cosign
+(`COSIGN_KEY=… npm run package`) et vérifiés avec la clé publique distribuée séparément ;
+`SHA256SUMS` vérifie ensuite l'intégrité de leur contenu. Les builds non signés
+ne sont autorisés qu'avec `ALLOW_UNSIGNED=true` pour les tests.
 
 ## 9. Hors du périmètre du code
 

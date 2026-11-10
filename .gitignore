@@ -9,5 +9,7 @@ dist/
 e2e-output/
 .certs/
 deploy/package/config.env
+deploy/environments/*.env
+deploy/package/dist/
 config.env
 .env*

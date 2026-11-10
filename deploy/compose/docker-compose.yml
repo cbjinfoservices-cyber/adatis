@@ -1,0 +1,131 @@
+# =============================================================================
+# ASP Automation Service Portal — déploiement Docker Compose (sans Kubernetes)
+#
+#   cd deploy/compose
+#   cp env.example .env        # puis renseigner DB_PASSWORD, etc.
+#   docker compose up -d --build
+#
+# Le portail répond sur http://localhost:${HTTP_PORT:-8080}. Détails : README.md.
+# =============================================================================
+name: asp-portal
+
+x-hardened: &hardened
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  postgres:
+    image: postgres:16.15-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-asp_portal}
+      POSTGRES_USER: ${DB_USER:-asp}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD est obligatoire (voir env.example)}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Migrations SQL idempotentes (équivalent du Job asp-db-migrate) : exécutées
+  # à chaque `up`, seules les nouvelles sont appliquées.
+  migrate:
+    image: postgres:16.15-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    restart: "no"
+    command: ["/bin/sh", "/sql/migrate.sh"]
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${DB_NAME:-asp_portal}
+      PGUSER: ${DB_USER:-asp}
+      PGPASSWORD: ${DB_PASSWORD}
+    volumes:
+      - ../../db:/sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [backend]
+
+  api:
+    <<: *hardened
+    build:
+      context: ../../api
+    image: asp-api:local
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: "8080"
+      DATABASE_URL: postgres://${DB_USER:-asp}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-asp_portal}
+      PG_POOL_MAX: "10"
+      PORTAL_URL: ${PORTAL_URL:-http://localhost:8080}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      AUTH_MODE: ${AUTH_MODE:-disabled}
+      AWX_BASE_URL: ${AWX_BASE_URL:-}
+      AWX_CLIENT_ID: ${AWX_CLIENT_ID:-}
+      AWX_CLIENT_SECRET: ${AWX_CLIENT_SECRET:-}
+      AWX_REDIRECT_URI: ${AWX_REDIRECT_URI:-}
+      AWX_SCOPES: ${AWX_SCOPES:-read write}
+      AWX_ADMIN_USERS: ${AWX_ADMIN_USERS:-}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      SESSION_IDLE_MINUTES: ${SESSION_IDLE_MINUTES:-30}
+      CONNECTOR_ALLOWED_HOSTS: ${CONNECTOR_ALLOWED_HOSTS:-}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+      ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    tmpfs:
+      - /tmp:size=64m
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [backend, frontend]
+
+  web:
+    <<: *hardened
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        BASE_PATH: /
+    image: asp-web:local
+    # nginx-unprivileged écrit ses fichiers temporaires dans /tmp.
+    tmpfs:
+      - /tmp:size=64m
+    networks: [frontend]
+
+  # Point d'entrée unique : /api -> API, le reste -> SPA (même origine, comme l'Ingress).
+  gateway:
+    <<: *hardened
+    image: nginxinc/nginx-unprivileged:1.30.6-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03
+    ports:
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:8080"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    tmpfs:
+      - /tmp:size=64m
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    networks: [frontend]
+
+volumes:
+  postgres-data:
+
+networks:
+  # Réseau interne : PostgreSQL n'est joignable que par l'API et la migration.
+  backend:
+    internal: true
+  frontend:

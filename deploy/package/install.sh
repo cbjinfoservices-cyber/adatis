@@ -3,8 +3,8 @@
 # ASP Automation Service Portal — installation depuis le package de production
 #
 #   cp config.env.example config.env    # renseigner domaine, HTTPS, Ascender…
-#   ./install.sh                        # charge les images puis déploie
-#   ./install.sh --no-ingress           # options transmises à deploy/deploy.sh
+#   bash install.sh                     # charge les images puis déploie
+#   bash install.sh --no-ingress        # options transmises à deploy/deploy.sh
 #
 # VM Linux vierge : sans cluster accessible, k3s (embarqué, hors ligne, avec
 # son contrôleur Ingress Traefik) est installé (K3S_INSTALL=auto, défaut).
@@ -37,30 +37,68 @@ TMP_DIR="$(mktemp -d)"
 chmod 700 "${TMP_DIR}"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
-# shellcheck source=/dev/null
-. "${PKG_DIR}/VERSION"
-
-if [ -f "${PKG_DIR}/config.env" ]; then
-  log "Configuration : config.env"
-  # Secrets (AWX_CLIENT_SECRET, SMTP…) : lisible par son propriétaire seul.
-  if [ -n "$(find "${PKG_DIR}/config.env" -perm /077 2>/dev/null)" ]; then
-    chmod 600 "${PKG_DIR}/config.env"
-    warn "config.env était lisible par d'autres utilisateurs : droits ramenés à 600"
-  fi
-  set -a
-  # shellcheck source=/dev/null
-  . "${PKG_DIR}/config.env"
-  set +a
-else
-  warn "config.env absent : valeurs par défaut (portail sans domaine ni SSO)"
-fi
-
-for cmd in sha256sum gunzip openssl base64 sed; do
+for cmd in sha256sum gunzip openssl base64 sed awk sort find; do
   command -v "${cmd}" >/dev/null 2>&1 || fail "${cmd} est introuvable"
 done
 
 log "Vérification de l'intégrité du package"
+[ -s "${PKG_DIR}/SHA256SUMS" ] || fail "SHA256SUMS absent ou vide"
+[ -z "$(find "${PKG_DIR}" -type l -print -quit)" ] || fail "Liens symboliques interdits dans le package"
+while IFS= read -r line || [ -n "${line}" ]; do
+  [[ "${line}" =~ ^[0-9a-f]{64}\ ([\ \*])([^[:space:]]+)$ ]] || fail "SHA256SUMS : ligne invalide"
+  rel="${BASH_REMATCH[2]}"
+  rel="${rel#./}"
+  case "/${rel}/" in
+    *"/../"*|*"/./"*) fail "SHA256SUMS : chemin invalide : ${rel}" ;;
+  esac
+  case "${rel}" in /*|*\\*) fail "SHA256SUMS : chemin invalide : ${rel}" ;; esac
+done < "${PKG_DIR}/SHA256SUMS"
+MANIFEST_FILES="$(awk '{p = substr($0, 67); sub(/^\*/, "", p); sub(/^\.\//, "", p); print p}' "${PKG_DIR}/SHA256SUMS" | sort)"
+PACKAGE_FILES="$(cd "${PKG_DIR}" && find . -type f ! -path ./SHA256SUMS ! -path ./config.env -print | sed 's#^\./##' | sort)"
+[ "${MANIFEST_FILES}" = "${PACKAGE_FILES}" ] || fail "SHA256SUMS : fichiers manquants, surnuméraires ou dupliqués"
 (cd "${PKG_DIR}" && sha256sum --quiet -c SHA256SUMS) || fail "SHA256SUMS : package altéré ou incomplet"
+for required in VERSION config.env.example images/images.tar.gz install.sh deploy/deploy.sh; do
+  [ -f "${PKG_DIR}/${required}" ] || fail "Fichier requis absent : ${required}"
+done
+
+read_key_value_file() {
+  local file="$1" allowed="$2" line key value seen=","
+  while IFS= read -r line || [ -n "${line}" ]; do
+    line="${line%$'\r'}"
+    case "${line}" in ''|'#'*) continue ;; esac
+    [[ "${line}" =~ ^([A-Z_][A-Z0-9_]*)=(.*)$ ]] || fail "Ligne invalide dans ${file}"
+    key="${BASH_REMATCH[1]}"
+    case "${seen}" in *",${key},"*) fail "Clé ${key} dupliquée dans ${file}" ;; esac
+    seen="${seen}${key},"
+    value="${BASH_REMATCH[2]}"
+    case ",${allowed}," in *",${key},"*) ;; *) fail "Clé ${key} non autorisée dans ${file}" ;; esac
+    if [[ "${value}" =~ ^\"(.*)\"$ ]] || [[ "${value}" =~ ^\'(.*)\'$ ]]; then
+      value="${BASH_REMATCH[1]}"
+    fi
+    export "${key}=${value}"
+  done < "${file}"
+}
+
+read_key_value_file "${PKG_DIR}/VERSION" \
+  "TAG,API_IMAGE,WEB_IMAGE,POSTGRES_IMAGE,BUSYBOX_IMAGE,K3S_VERSION,K3S_ARCH,K3S_BINARY,THIRD_PARTY_IMAGES,BASE_PATH,PLATFORM,BUILT_AT,COMMIT"
+PACKAGE_TAG="${TAG:-}"
+[ -n "${PACKAGE_TAG}" ] || fail "TAG absent de VERSION"
+[ -n "${API_IMAGE:-}" ] && [ -n "${WEB_IMAGE:-}" ] \
+  || fail "API_IMAGE ou WEB_IMAGE absent de VERSION"
+[ -n "${POSTGRES_IMAGE:-}" ] && [ -n "${BUSYBOX_IMAGE:-}" ] \
+  || fail "POSTGRES_IMAGE ou BUSYBOX_IMAGE absent de VERSION"
+if [ -f "${PKG_DIR}/config.env" ]; then
+  log "Configuration : config.env"
+  chmod 600 "${PKG_DIR}/config.env" || fail "Impossible de protéger config.env (droits 600 requis)"
+  read_key_value_file "${PKG_DIR}/config.env" \
+    "KUBECONFIG,K3S_INSTALL,K3S_EXTRA_ARGS,REGISTRY,NAMESPACE,DOMAIN,LETSENCRYPT_EMAIL,CERT_MANAGER_ISSUER,TLS_CERT_FILE,TLS_KEY_FILE,TLS_SELF_SIGNED,AWX_BASE_URL,AWX_CLIENT_ID,AWX_CLIENT_SECRET,AWX_ADMIN_USERS,ASCENDER_CA_FILE,SESSION_IDLE_MINUTES,SESSION_TTL_HOURS,INGRESS_NAMESPACE,API_EGRESS_CIDR,CONNECTOR_ALLOWED_HOSTS,SMTP_HOST,SMTP_PORT,SMTP_SECURE,SMTP_USER,SMTP_PASSWORD,ALERT_EMAIL_TO,ALERT_EMAIL_FROM,PORTAL_URL,AWX_REDIRECT_URI,AWX_SCOPES,TOKEN_ENCRYPTION_KEY,TOKEN_ENCRYPTION_KEYS_PREVIOUS,FORCE_DB_PASSWORD,ALLOWED_ORIGINS,API_URL,BASE_PATH,DB_NAME,DB_USER,RESEND_API_KEY,ALLOW_EXTERNAL_MAIL"
+else
+  fail "config.env requis : copier config.env.example et renseigner les paramètres de production"
+fi
+# La version vient du package ; config.env ne peut pas la remplacer.
+TAG="${PACKAGE_TAG}"
+[ -n "${API_EGRESS_CIDR:-}" ] || fail "API_EGRESS_CIDR doit limiter l'egress aux réseaux Ascender, SMTP et connecteurs"
+case "${API_EGRESS_CIDR}" in 0.0.0.0/0|::/0) fail "API_EGRESS_CIDR ne peut pas être ouvert à tous les réseaux en production" ;; esac
 ok "Package ${TAG} intègre"
 
 # ---------------------------------------------------------------------------
@@ -235,4 +273,4 @@ if [ -z "${REGISTRY}" ]; then
   export POSTGRES_IMAGE BUSYBOX_IMAGE
 fi
 # Sans exec : le trap doit supprimer les fichiers temporaires à la fin.
-"${PKG_DIR}/deploy/deploy.sh" --skip-build "$@"
+bash "${PKG_DIR}/deploy/deploy.sh" --skip-build "$@"

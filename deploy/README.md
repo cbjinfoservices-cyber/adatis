@@ -16,6 +16,41 @@ L'Ingress `asp-portal` route `/api` vers l'API et `/` vers le frontend.
 
 ---
 
+## 0. Déploiement par environnement (dev, staging, prod)
+
+Les profils sont dans `deploy/environments/`. Copier chaque `<env>.env.example`
+en `<env>.env` (ignoré par Git) et renseigner les secrets.
+Cette procédure s'applique au dépôt source ; pour le package hors ligne,
+utiliser `deploy/package/INSTALL.md` et `install.sh`.
+
+```bash
+# Linux / macOS / Git Bash / WSL
+./deploy/deploy-env.sh --env dev     --target compose
+./deploy/deploy-env.sh --env staging --target k8s
+./deploy/deploy-env.sh --env prod    --target k8s --dry-run   # validation seule
+```
+
+```powershell
+# Windows PowerShell
+.\deploy\deploy-env.ps1 -Environment dev -Target compose
+.\deploy\deploy-env.ps1 -Environment staging -Target k8s     # délègue à bash (Git Bash ou WSL)
+.\deploy\deploy-env.ps1 -Environment prod -Target k8s -DryRun
+```
+
+Règles appliquées avant tout déploiement :
+
+- `APP_ENV` du profil doit correspondre à l'environnement demandé.
+- staging et prod : `NODE_ENV=production`, `AUTH_MODE=awx`, `COOKIE_SECURE=true`,
+  `PORTAL_URL` et `AWX_BASE_URL` en `https://`.
+- Kubernetes : `KUBE_CONTEXT` obligatoire et égal au contexte `kubectl` courant.
+  Chaque environnement doit avoir son propre cluster, car les manifestes utilisent
+  le namespace `asp-portal` en dur.
+- `--reset-db` interdit en prod.
+- prod n'est pas déployable avec Compose (pas de TLS PostgreSQL).
+
+`--skip-build` réutilise les images ; `--dry-run` valide sans rien modifier.
+Les deux scripts appliquent les mêmes règles : les mettre à jour ensemble.
+
 ## 1. Prérequis
 
 - un cluster Kubernetes (kind, minikube, k3s, EKS, AKS, GKE…)
@@ -222,7 +257,7 @@ kubectl -n asp-portal exec deploy/asp-api -- wget -qO- localhost:8080/api/system
 | `SESSION_IDLE_MINUTES` | `30` | expiration après inactivité |
 | `CONNECTOR_ALLOWED_HOSTS` | vide | hôtes que le test de connecteur peut appeler (`*.domaine` accepté) ; vide = test désactivé |
 | `INGRESS_NAMESPACE` | détecté, sinon `kube-system` | namespace de Traefik, dont les pods sont autorisés par les NetworkPolicy |
-| `API_EGRESS_CIDR` | `0.0.0.0/0` | réseau joignable par l'API (Ascender, SMTP, connecteurs) ; métadonnées cloud toujours exclues |
+| `API_EGRESS_CIDR` | requis hors dev | réseau joignable par l'API (Ascender, SMTP, connecteurs) ; `0.0.0.0/0` est refusé hors dev |
 | `POSTGRES_IMAGE` / `BUSYBOX_IMAGE` | épinglées par empreinte | images tierces |
 
 ## 3bis. Authentification SSO Ascender (AWX)

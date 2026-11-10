@@ -43,7 +43,7 @@
 #
 #   Réseau :
 #   INGRESS_NAMESPACE   namespace de Traefik, contrôleur Ingress requis (défaut : détecté, sinon kube-system)
-#   API_EGRESS_CIDR     réseau joignable par l'API : Ascender, SMTP, connecteurs (défaut : 0.0.0.0/0)
+#   API_EGRESS_CIDR     CIDR d'egress API ; requis hors dev, restreindre à Ascender/SMTP/connecteurs
 #   CONNECTOR_ALLOWED_HOSTS hôtes que le test de connecteur peut appeler (ex. jenkins.acme.fr,*.ci.acme.fr)
 #
 #   Alertes email :
@@ -129,6 +129,11 @@ done
 # ---------------------------------------------------------------------------
 log "Vérification des prérequis"
 command -v kubectl >/dev/null 2>&1 || fail "kubectl est introuvable"
+if [ "${APP_ENV:-prod}" != dev ]; then
+  case "${API_EGRESS_CIDR}" in
+    0.0.0.0/0|::/0) fail "API_EGRESS_CIDR doit limiter l'egress aux réseaux Ascender, SMTP et connecteurs (vide utilise une valeur non sûre)" ;;
+  esac
+fi
 if ! KUBECTL_ERR="$(kubectl cluster-info 2>&1 >/dev/null)"; then
   fail "Cluster injoignable avec le kubeconfig ${KUBECONFIG:-~/.kube/config} (variable KUBECONFIG pour un autre fichier) : ${KUBECTL_ERR##*$'\n'}"
 fi
