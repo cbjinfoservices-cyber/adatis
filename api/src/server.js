@@ -89,7 +89,7 @@ app.use('/api', (req, res, next) => {
   return requireAuth(req, res, next);
 });
 
-const ADMIN_WRITE_PREFIXES = ['/adapters', '/connectors', '/tenants', '/system/settings', '/auth/mappings', '/auth/users', '/admin/services'];
+const ADMIN_WRITE_PREFIXES = ['/adapters', '/connectors', '/tenants', '/system/settings', '/auth/mappings', '/auth/users', '/admin/services', '/admin/template-visibility'];
 app.use('/api', (req, res, next) => {
   if (authMode() === 'disabled') return next();
   if (!['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) return next();
@@ -129,6 +129,9 @@ app.use((err, _req, res, _next) => {
   if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'invalid_json' });
   if (err.type === 'entity.too.large') return res.status(413).json({ error: 'payload_too_large' });
   console.error('[api]', err.message);
+  if (Number.isInteger(err.status) && err.status >= 400 && err.status < 600) {
+    return res.status(err.status).json({ error: err.code || 'request_failed' });
+  }
   // En production, le détail reste dans les journaux, jamais dans la réponse.
   return res.status(500).json({ error: 'internal_error', ...(isProduction ? {} : { message: err.message }) });
 });

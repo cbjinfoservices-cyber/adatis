@@ -70,9 +70,14 @@ Détail complet, exploitation et points hors code : [SECURITY.md](SECURITY.md).
 - **Audit** : journal en ajout seul, chaîné par empreinte (vérifiable depuis
   la page Système) et copié en JSON sur la sortie standard pour un SIEM.
 - **Rôles** : superutilisateur Ascender ou `AWX_ADMIN_USERS` → administrateur ;
-  sinon mappings organisation / équipe → approbateur ou demandeur.
+  sinon mappings organisation / équipe → approbateur, chef de projet ou demandeur.
 - **Périmètre** : un demandeur ne voit que ses demandes ; un approbateur celles
   de son tenant (sans tenant : seulement les siennes) ; un administrateur tout.
+- **Modèles par projet** : dans Administration → Services, chaque job template
+  Ascender peut avoir une règle de visibilité par rôle portail. Sans règle, les
+  droits AWX seuls s'appliquent ; les droits de lancement AWX sont toujours
+  vérifiés à la demande et au lancement. Le rôle chef de projet est attribué
+  par mapping d'équipe ou d'organisation.
 - **Approbation** : un service soumis à approbation ne lance rien avant la
   décision finale ; le job part alors avec le jeton du demandeur, même déconnecté
   depuis moins de `SESSION_LAUNCH_GRACE_DAYS` jours (sinon il le lance lui-même).

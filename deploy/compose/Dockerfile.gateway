@@ -1,0 +1,6 @@
+ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:1.30.6-alpine@sha256:e2a8fca8aa356d66159aaf8a877a9c126773635adf210503eefaaeaffeed6ad7
+FROM ${NGINX_IMAGE}
+
+USER root
+RUN apk upgrade --no-cache
+USER 101

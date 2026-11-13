@@ -3,8 +3,8 @@
   Installe ASP Automation Service Portal depuis le package Windows (sur un cluster existant).
 .DESCRIPTION
   1. Verifie l'integrite du package (SHA256SUMS).
-  2. Charge images\images.tar.gz dans Docker (ou le pousse vers REGISTRY).
-  3. Lance deploy\deploy.sh --skip-build avec Git Bash, avec les parametres de config.env.
+  2. Charge les images incluses, réutilise les images existantes ou les construit depuis les sources.
+  3. Lance deploy\deploy.sh avec Git Bash, avec les parametres de config.env.
   Prerequis : Docker Desktop, kubectl avec un kubeconfig vers le cluster cible, Git Bash.
   Pour une VM Linux vierge, utiliser le package .tar.gz et install.sh a la place.
 .EXAMPLE
@@ -85,7 +85,7 @@ $manifestFiles = @($expectedFiles.Keys | Sort-Object -CaseSensitive)
 if (Compare-Object -ReferenceObject $actualFiles -DifferenceObject $manifestFiles -CaseSensitive) {
     throw 'SHA256SUMS : fichiers manquants, surnumeraires ou dupliques'
 }
-foreach ($required in 'VERSION', 'config.env.example', 'images/images.tar.gz', 'install.ps1', 'deploy/deploy.sh') {
+foreach ($required in 'VERSION', 'config.env.example', 'install.ps1', 'deploy/deploy.sh') {
     if (-not $expectedFiles.ContainsKey($required)) { throw "Fichier requis absent de SHA256SUMS : $required" }
 }
 $version = Read-KeyValueFile (Join-Path $PkgDir 'VERSION')
@@ -93,17 +93,46 @@ if (-not $version.ContainsKey('TAG') -or -not $version['TAG']) { throw 'TAG abse
 foreach ($key in $version.Keys) {
     if ($key -notin @(
         'TAG', 'API_IMAGE', 'WEB_IMAGE', 'POSTGRES_IMAGE', 'BUSYBOX_IMAGE',
-        'K3S_VERSION', 'K3S_ARCH', 'K3S_BINARY', 'THIRD_PARTY_IMAGES',
-        'BASE_PATH', 'PLATFORM', 'BUILT_AT', 'COMMIT'
+        'K3S_VERSION', 'K3S_ARCH', 'K3S_BINARY', 'K3S_SOURCE_IMAGES_SHA256', 'THIRD_PARTY_IMAGES',
+        'BASE_PATH', 'PLATFORM', 'INCLUDE_IMAGES', 'BUILD_FROM_SOURCE', 'BUILT_AT', 'COMMIT'
     )) {
         throw "Cle $key non autorisee dans VERSION"
     }
 }
 if (-not $version['API_IMAGE'] -or -not $version['WEB_IMAGE']) { throw 'Images API/WEB absentes de VERSION' }
+if ($version['INCLUDE_IMAGES'] -notin @('true', 'false')) { throw 'INCLUDE_IMAGES absent ou invalide dans VERSION' }
+$includeImages = $version['INCLUDE_IMAGES'] -eq 'true'
+$buildFromSource = $version['BUILD_FROM_SOURCE'] -eq 'true'
+if ($version['BUILD_FROM_SOURCE'] -and $version['BUILD_FROM_SOURCE'] -notin @('true', 'false')) {
+    throw 'BUILD_FROM_SOURCE invalide dans VERSION'
+}
+if ($buildFromSource -and $includeImages) { throw 'BUILD_FROM_SOURCE requiert INCLUDE_IMAGES=false' }
+if ($includeImages) {
+    foreach ($required in 'POSTGRES_IMAGE', 'BUSYBOX_IMAGE', 'images/images.tar.gz') {
+        if ($required -eq 'images/images.tar.gz') {
+            if (-not $expectedFiles.ContainsKey($required)) { throw "Fichier requis absent de SHA256SUMS : $required" }
+        } elseif (-not $version[$required]) { throw "$required absent de VERSION" }
+    }
+} else {
+    if ($expectedFiles.ContainsKey('images/images.tar.gz')) { throw 'Archive d images inattendue dans le package sans images' }
+    if ($version['K3S_BINARY']) { throw 'Un package sans images ne peut pas embarquer k3s' }
+}
+if ($buildFromSource) {
+    foreach ($required in 'Dockerfile', 'api/Dockerfile', 'deploy/package/postgres.Dockerfile') {
+        if (-not $expectedFiles.ContainsKey($required)) { throw "Source ou Dockerfile absent du package : $required" }
+    }
+}
 Write-Host "OK Package $($version.TAG) integre"
 
-foreach ($cmd in 'docker', 'kubectl') {
+foreach ($cmd in 'kubectl') {
     if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { throw "$cmd introuvable" }
+}
+if (($includeImages -or $buildFromSource) -and -not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    throw 'docker introuvable : requis pour charger ou construire les images'
+}
+if ($buildFromSource) {
+    & docker info --format '{{.ServerVersion}}' *> $null
+    if ($LASTEXITCODE -ne 0) { throw 'Docker ne repond pas : demarrer Docker Desktop' }
 }
 
 # bash du Windows (WSL) ne voit pas les variables d'environnement Windows : Git Bash obligatoire.
@@ -126,7 +155,8 @@ if (Test-Path -LiteralPath $ConfigFile) {
         'CONNECTOR_ALLOWED_HOSTS', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASSWORD',
         'ALERT_EMAIL_TO', 'ALERT_EMAIL_FROM', 'PORTAL_URL', 'AWX_REDIRECT_URI', 'AWX_SCOPES',
         'TOKEN_ENCRYPTION_KEY', 'TOKEN_ENCRYPTION_KEYS_PREVIOUS', 'FORCE_DB_PASSWORD', 'ALLOWED_ORIGINS',
-        'API_URL', 'BASE_PATH', 'DB_NAME', 'DB_USER', 'RESEND_API_KEY', 'ALLOW_EXTERNAL_MAIL'
+        'API_URL', 'BASE_PATH', 'API_IMAGE', 'WEB_IMAGE', 'POSTGRES_IMAGE', 'BUSYBOX_IMAGE',
+        'DB_NAME', 'DB_USER', 'RESEND_API_KEY', 'ALLOW_EXTERNAL_MAIL'
     )
     foreach ($key in $config.Keys) {
         if ($key -notin $allowedKeys) { throw "Cle $key non autorisee dans config.env" }
@@ -150,41 +180,67 @@ if ($LASTEXITCODE -ne 0) { throw 'kubectl : aucun contexte actif (verifier KUBEC
 if ($LASTEXITCODE -ne 0) { throw "Cluster injoignable avec le contexte '$kubeContext'" }
 Write-Host "OK Cluster : $kubeContext"
 
-$archive = Join-Path $PkgDir 'images\images.tar.gz'
-$tar = Join-Path $env:TEMP "asp-portal-images-$([guid]::NewGuid().ToString('N')).tar"
-try {
-    Write-Host '== Chargement des images dans Docker'
-    $in = [IO.File]::OpenRead($archive)
+if ($includeImages) {
+    $archive = Join-Path $PkgDir 'images\images.tar.gz'
+    $tar = Join-Path $env:TEMP "asp-portal-images-$([guid]::NewGuid().ToString('N')).tar"
     try {
-        $gz = New-Object IO.Compression.GZipStream($in, [IO.Compression.CompressionMode]::Decompress)
-        $out = [IO.File]::Create($tar)
-        try { $gz.CopyTo($out) } finally { $out.Dispose(); $gz.Dispose() }
-    } finally { $in.Dispose() }
-    & docker info --format '{{.ServerVersion}}' *> $null
-    if ($LASTEXITCODE -ne 0) { throw 'Docker ne repond pas : demarrer Docker Desktop' }
-    & docker load -i $tar
-    if ($LASTEXITCODE -ne 0) { throw 'docker load a echoue' }
-}
-finally {
-    Remove-Item -LiteralPath $tar -Force -ErrorAction SilentlyContinue
-}
-
-if ($registry) {
-    foreach ($image in $version.API_IMAGE, $version.WEB_IMAGE) {
-        Write-Host "== Push de $registry/$image"
-        & docker tag $image "$registry/$image"
-        if ($LASTEXITCODE -ne 0) { throw "Tag de $image echoue" }
-        & docker push "$registry/$image"
-        if ($LASTEXITCODE -ne 0) { throw "Push de $image echoue" }
+        Write-Host '== Chargement des images dans Docker'
+        $in = [IO.File]::OpenRead($archive)
+        try {
+            $gz = New-Object IO.Compression.GZipStream($in, [IO.Compression.CompressionMode]::Decompress)
+            $out = [IO.File]::Create($tar)
+            try { $gz.CopyTo($out) } finally { $out.Dispose(); $gz.Dispose() }
+        } finally { $in.Dispose() }
+        & docker info --format '{{.ServerVersion}}' *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'Docker ne repond pas : demarrer Docker Desktop' }
+        & docker load -i $tar
+        if ($LASTEXITCODE -ne 0) { throw 'docker load a echoue' }
     }
-} elseif ($kubeContext -ne 'docker-desktop') {
-    Write-Warning "REGISTRY non defini et contexte '$kubeContext' : le cluster doit partager le runtime Docker de cette machine"
+    finally {
+        Remove-Item -LiteralPath $tar -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($registry) {
+        foreach ($image in $version.API_IMAGE, $version.WEB_IMAGE, $version.POSTGRES_IMAGE) {
+            Write-Host "== Push de $registry/$image"
+            & docker tag $image "$registry/$image"
+            if ($LASTEXITCODE -ne 0) { throw "Tag de $image echoue" }
+            & docker push "$registry/$image"
+            if ($LASTEXITCODE -ne 0) { throw "Push de $image echoue" }
+        }
+    }
+    elseif ($kubeContext -ne 'docker-desktop') {
+        Write-Warning "REGISTRY non defini et contexte '$kubeContext' : le cluster doit partager le runtime Docker de cette machine"
+    }
+} else {
+    $refPrefix = if ($registry) { "$($registry.TrimEnd('/'))/" } else { '' }
+    foreach ($name in 'API_IMAGE', 'WEB_IMAGE', 'POSTGRES_IMAGE') {
+        if (-not $config[$name]) {
+            $short = switch ($name) {
+                'API_IMAGE' { 'asp-api' }
+                'WEB_IMAGE' { 'asp-web' }
+                default { 'asp-postgres' }
+            }
+            $fallback = if ($registry) { "$refPrefix$short`:$($version.TAG)" } else { $version[$name] }
+            [Environment]::SetEnvironmentVariable($name, $fallback, 'Process')
+        }
+    }
+    if (-not $config['BUSYBOX_IMAGE']) {
+        [Environment]::SetEnvironmentVariable('BUSYBOX_IMAGE', $version.BUSYBOX_IMAGE, 'Process')
+    }
+    Write-Host '== Images non chargees ; le cluster doit deja pouvoir les recuperer'
 }
 
-Write-Host '== Deploiement (deploy.sh --skip-build)'
+if ($buildFromSource) {
+    Write-Host '== Construction des images depuis les sources et deploiement'
+    $buildArgs = @()
+} else {
+    Write-Host '== Deploiement (deploy.sh --skip-build)'
+    $buildArgs = @('--skip-build')
+}
 Push-Location $PkgDir
 try {
-    & $gitBash ./deploy/deploy.sh --skip-build @DeployArgs
+    & $gitBash ./deploy/deploy.sh @buildArgs @DeployArgs
     if ($LASTEXITCODE -ne 0) { throw "deploy.sh a echoue (code $LASTEXITCODE)" }
 }
 finally { Pop-Location }

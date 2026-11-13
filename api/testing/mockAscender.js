@@ -10,13 +10,15 @@ const USERS = {
   alice: { id: 2, username: 'alice', email: 'alice@acme.fr', first_name: 'Alice', last_name: 'Martin', is_superuser: false, orgs: ['Infra'], teams: [] },
   bob: { id: 3, username: 'bob', email: 'bob@acme.fr', first_name: 'Bob', last_name: 'Durand', is_superuser: false, orgs: ['Infra'], teams: [['Approvers', 'Infra']] },
   carol: { id: 4, username: 'carol', email: 'carol@acme.fr', first_name: 'Carol', last_name: 'Petit', is_superuser: false, orgs: ['Infra'], teams: [] },
+  dave: { id: 5, username: 'dave', email: 'dave@acme.fr', first_name: 'Dave', last_name: 'Martin', is_superuser: false, orgs: ['Infra'], teams: [['Project Managers', 'Infra']] },
 };
 
 // Template 9 (DNS) visible par tous, 7 (VM) et workflow 20 réservés à admin.
 // Chaque job template appartient à un projet Ascender ; un workflow n'en a pas.
 const TEMPLATES = [
   { id: 7, name: 'Créer VM Linux', users: ['admin'], project: { id: 31, name: 'infra-provisioning' } },
-  { id: 9, name: 'Créer entrée DNS', users: ['admin', 'alice', 'bob', 'carol'], project: { id: 32, name: 'network-dns' } },
+  { id: 9, name: 'Créer entrée DNS', users: ['admin', 'alice', 'bob', 'carol', 'dave'], project: { id: 32, name: 'network-dns' } },
+  { id: 11, name: 'Auditer le réseau', users: ['admin', 'alice', 'bob', 'carol', 'dave'], project: { id: 32, name: 'network-dns' } },
 ];
 const WORKFLOWS = [{ id: 20, name: 'Provisionner une application', users: ['admin'] }];
 

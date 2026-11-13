@@ -6,7 +6,7 @@ const { authMode } = require('./auth');
  *   admin     : tout
  *   approver  : les demandes de son tenant ; sans tenant, seulement les siennes
  *               (périmètre fermé par défaut, jamais « tout »)
- *   requester : uniquement ses propres demandes
+ *   requester / project_manager : uniquement leurs propres demandes
  *
  * Sans SSO (AUTH_MODE=disabled, mode développement), aucun filtre.
  */

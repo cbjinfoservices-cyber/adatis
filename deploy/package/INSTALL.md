@@ -1,8 +1,8 @@
 # Installation — ASP Automation Service Portal
 
-Package hors ligne pour Kubernetes : images, manifestes, scripts SQL et
-script de déploiement. La version figure dans `VERSION`. Il embarque aussi
-k3s (avec son contrôleur Ingress Traefik) pour une installation sur VM vierge.
+Package de déploiement Kubernetes : manifestes, scripts SQL et script de
+déploiement. Selon sa variante, il peut embarquer les images applicatives et
+k3s, ou réutiliser les images déjà accessibles au cluster de production.
 
 Avant toute extraction, vérifier la signature détachée de l'archive avec la clé
 publique de confiance remise séparément :
@@ -34,6 +34,19 @@ sudo bash install.sh
 Utiliser `bash install.sh` : le transfert du package peut retirer le bit
 d'exécution des scripts.
 
+Le bundle Linux K3s conserve le binaire et le script d'installation officiels
+vérifiés, mais l'archive d'images est dérivée : klipper-helm, klipper-lb et
+local-path-provisioner sont remplacés sous les tags attendus par K3s.
+Les digests amont, le commit source du composant reconstruit et l'empreinte de
+l'archive officielle initiale sont consignés dans
+`k3s/K3S-IMAGE-OVERRIDES.txt` et `VERSION`. Cette distribution n'est donc pas
+un bundle Rancher/K3s non modifié.
+
+Seules ces trois images ont été ciblées par cette correction. Elle ne certifie
+pas l'absence de vulnérabilités dans le binaire K3s, les autres images, ni le
+package complet. Vérifier le rapport de scan applicable à l'environnement et
+valider la compatibilité dans une plateforme de préproduction avant déploiement.
+
 Sans cluster configuré sur la machine, `install.sh` installe k3s (service
 systemd `k3s`) avec Traefik sur les ports 80/443 de la VM, puis le portail. Sans certificat fourni, `TLS_SELF_SIGNED=true` génère un
 certificat auto-signé (tests uniquement : en production, un certificat
@@ -53,7 +66,58 @@ Commandes utiles ensuite : `sudo k3s kubectl -n asp-portal get pods`.
 Désinstallation complète : `sudo /usr/local/bin/k3s-uninstall.sh`
 (supprime aussi la base).
 
-## Cluster existant — prérequis sur la machine d'installation
+## Package sans images — cluster de production existant
+
+Cette variante n'embarque ni archive d'images ni k3s et ne nécessite pas Docker.
+Le cluster doit déjà fonctionner et pouvoir récupérer les images configurées
+dans `config.env` (ou les avoir préchargées sur ses nœuds).
+
+```sh
+tar xzf asp-portal-<version>.tar.gz
+cd asp-portal-<version>
+cp config.env.example config.env
+```
+
+Dans `config.env`, renseigner les références exactes des images existantes :
+`API_IMAGE`, `WEB_IMAGE`, `POSTGRES_IMAGE` et `BUSYBOX_IMAGE`. Si les images
+suivent le nom/tag `asp-api:<version>`, `asp-web:<version>` et
+`asp-postgres:<version>`, la configuration peut rester vide ou utiliser
+`REGISTRY` pour préfixer les trois images applicatives. `BUSYBOX_IMAGE` reste
+une référence distincte. Laisser `REGISTRY` vide si les images sont déjà
+préchargées localement ; avec un registre, les références doivent être
+accessibles aux nœuds Kubernetes.
+
+```sh
+bash install.sh
+```
+
+L'installateur vérifie `SHA256SUMS`, ne charge ni ne pousse aucune image, puis
+déploie les références configurées. Il ne faut pas utiliser cette variante pour
+installer un nouveau cluster.
+
+## Package sans archive d'images — construction depuis les sources
+
+Le mode `-BuildFromSource` inclut les sources de l'API et du frontend ainsi que
+leurs Dockerfiles, mais aucune image applicative. L'installateur construit les
+images API, web et PostgreSQL puis les déploie. Il nécessite Docker fonctionnel,
+un accès réseau aux registres d'images de base et au registre npm, ainsi qu'un
+registre d'images (`REGISTRY`) accessible aux nœuds du cluster, notamment pour
+un cluster multi-nœuds. Les images BusyBox restent récupérées selon la référence
+`BUSYBOX_IMAGE`.
+
+Renseigner `REGISTRY` et les paramètres de production dans `config.env`, puis :
+
+```sh
+tar xzf asp-portal-<version>.tar.gz
+cd asp-portal-<version>
+cp config.env.example config.env
+bash install.sh
+```
+
+Cette variante ne contient pas l'application compilée : les images sont
+construites à l'installation depuis les sources embarquées.
+
+## Cluster existant — prérequis pour un package avec images
 
 - `kubectl` et un **kubeconfig** donnant accès au cluster cible : `KUBECONFIG`
   dans `config.env`, sinon `~/.kube/config`. Sur un nœud k3s ou microk8s,
@@ -75,18 +139,23 @@ cp config.env.example config.env    # renseigner domaine, HTTPS, Ascender
 bash install.sh
 ```
 
-`install.sh` vérifie l'intégrité et l'exhaustivité du package (`SHA256SUMS`),
-charge les images puis lance `deploy/deploy.sh --skip-build`. `config.env` est
-lu comme un fichier de valeurs, jamais exécuté comme un script. Les options de
-`deploy.sh` lui sont transmises, par exemple `bash install.sh --no-ingress`.
+Pour un package avec images, `install.sh` vérifie l'intégrité et l'exhaustivité
+du package (`SHA256SUMS`), charge les images puis lance
+`deploy/deploy.sh --skip-build`. `config.env` est lu comme un fichier de valeurs,
+jamais exécuté comme un script. Les options de `deploy.sh` lui sont transmises,
+par exemple `bash install.sh --no-ingress`.
+L'image PostgreSQL du package est construite depuis une base Alpine épinglée,
+avec les paquets système mis à niveau au build ; elle est incluse avec les
+images API et frontend.
 
 ## Installation Windows (cluster existant)
 
-Pour un cluster déjà en service, depuis le package `asp-portal-<version>-windows.zip`
-(sans k3s) :
+Pour un cluster déjà en service, depuis le package
+`asp-portal-<version>-windows.zip` :
 
-Prérequis : Docker Desktop démarré, `kubectl` avec un kubeconfig vers le cluster
-cible, et Git Bash (Git for Windows). WSL n'est pas utilisable : il ne voit pas les
+Prérequis : `kubectl` avec un kubeconfig vers le cluster cible et Git Bash
+(Git for Windows). Docker Desktop est requis si le package contient les images
+ou si `BUILD_FROM_SOURCE=true`. WSL n'est pas utilisable : il ne voit pas les
 variables d'environnement Windows.
 
 ```powershell
@@ -97,8 +166,12 @@ Copy-Item config.env.example config.env    # renseigner domaine, HTTPS, Ascender
 .\install.ps1 -DeployArgs '--no-ingress'   # options de deploy.sh
 ```
 
-`install.ps1` vérifie `SHA256SUMS`, charge `images\images.tar.gz` dans Docker
-(et pousse vers `REGISTRY` si défini), puis lance `deploy/deploy.sh --skip-build`.
+`install.ps1` vérifie `SHA256SUMS`. Un package avec images les charge dans
+Docker (et les pousse vers `REGISTRY` si défini) ; un package sans images
+réutilise les images indiquées dans `config.env`, sauf en mode
+`BUILD_FROM_SOURCE=true` où il construit les images avec Docker. Les images
+construites sont poussées vers `REGISTRY` si défini. Seul le mode qui réutilise
+les images lance `deploy/deploy.sh --skip-build`.
 Les ACL de `config.env` sont réduites à l'utilisateur courant, SYSTEM et
 Administrators ; le fichier ne doit pas être stocké sur un volume sans ACL NTFS.
 
@@ -109,12 +182,33 @@ Depuis Windows, Docker Desktop démarré (`deploy\package\build-package.ps1`) :
 ```powershell
 .\deploy\package\build-package.ps1 -Version 1.0.0 -CosignKey C:\secure\cosign.key
 .\deploy\package\build-package.ps1 -Version 1.0.0 -CosignKey C:\secure\cosign.key -NoK3s
+.\deploy\package\build-package.ps1 -Version 1.0.0 -CosignKey C:\secure\cosign.key -NoK3s -NoImages
+.\deploy\package\build-package.ps1 -Version 1.0.0 -CosignKey C:\secure\cosign.key -NoK3s -NoImages -BuildFromSource
 ```
 
-Produit dans `deploy\package\dist\` :
-- `asp-portal-<version>.tar.gz` : package Linux (k3s embarqué, binaire et images
-  vérifiés contre `sha256sum-<arch>.txt` de la release ; `install.sh` vérifié
-  contre son empreinte épinglée) ;
+`-NoImages -NoK3s` produit une variante pour un cluster existant, sans Docker
+et sans archive d'images. Renseigner les images accessibles dans le `config.env`
+livré avec le package, ou les passer avec `-ApiImageRef`, `-WebImageRef`,
+`-PostgresImageRef` et `-BusyboxImageRef` pour les inscrire dans `VERSION`.
+Ajouter `-BuildFromSource` inclut le code source et les Dockerfiles : Docker
+construit l'API, le frontend et PostgreSQL lors de l'installation. Cette variante
+nécessite Docker, un accès aux registres de dépendances pendant le build et
+`REGISTRY` pour rendre les images disponibles à un cluster distant ou multi-nœuds.
+Sans `-BuildFromSource`, le package sans images reste un simple déploiement des
+images déjà publiées/référencées.
+Depuis un environnement Linux/Git Bash, l'équivalent est :
+
+```sh
+BUILD_FROM_SOURCE=true INCLUDE_IMAGES=false BUNDLE_K3S=false ./scripts/package.sh
+```
+La construction Linux avec images charge d'abord l'archive officielle K3s vérifiée, remplace
+les trois images sélectionnées et exporte l'ensemble des huit images attendues
+dans une nouvelle archive. Elle est validée uniquement pour K3s
+`v1.36.6+k3s1`; une autre version est refusée tant que ses tags et sa compatibilité
+n'ont pas été vérifiés. Produit dans `deploy\package\dist\` :
+- `asp-portal-<version>.tar.gz` : package Linux (binaire K3s et archive source
+  vérifiés contre les empreintes de release ; script `install.sh` vérifié contre
+  son empreinte épinglée ; archive d'images dérivée avec provenance tracée) ;
 - `asp-portal-<version>-windows.zip` : package Windows (sans k3s, avec `install.ps1`).
 - un bundle de signature `.sigstore.json` pour chaque archive, créé avec `-CosignKey`. La clé privée
   ne doit jamais être commitée ni incluse dans le package ; remettre la clé publique

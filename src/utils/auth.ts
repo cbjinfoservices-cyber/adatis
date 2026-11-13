@@ -1,6 +1,6 @@
 import { API_BASE, api } from '@/utils/api';
 
-export type PortalRole = 'admin' | 'approver' | 'requester';
+export type PortalRole = 'admin' | 'approver' | 'requester' | 'project_manager';
 
 /** misconfigured : AUTH_MODE=awx mais configuration incomplète, portail fermé. */
 export type AuthMode = 'awx' | 'disabled' | 'misconfigured';
@@ -101,7 +101,7 @@ export type AuthEvent = {
   detail: string;
 };
 
-export const ROLES: PortalRole[] = ['admin', 'approver', 'requester'];
+export const ROLES: PortalRole[] = ['admin', 'approver', 'requester', 'project_manager'];
 
 export const fetchAuthConfig = () => api.get<AuthConfig>('/auth/config');
 

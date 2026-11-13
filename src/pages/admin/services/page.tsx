@@ -6,9 +6,10 @@ import ReadOnlyNotice from '@/components/base/ReadOnlyNotice';
 import useReadOnly from '@/hooks/useReadOnly';
 import { ErrorBlock, LoadingBlock } from '@/components/base/DataState';
 import ServiceTemplateRow from '@/pages/admin/services/components/ServiceTemplateRow';
+import ProjectTemplateVisibility from '@/pages/admin/services/components/ProjectTemplateVisibility';
 import {
-  fetchAdminServices, fetchAwxTemplates,
-  type AdminServiceItem, type AwxTemplateCatalog, type AwxTemplateKind,
+  fetchAdminServices, fetchAwxTemplates, fetchTemplateVisibility,
+  type AdminServiceItem, type AwxTemplateCatalog, type AwxTemplateKind, type TemplateVisibilityRule,
 } from '@/utils/awxAdmin';
 import Toast from '@/components/base/Toast';
 import useToast from '@/hooks/useToast';
@@ -22,6 +23,7 @@ export default function AdminServicesPage() {
   const readOnly = useReadOnly();
   const [items, setItems] = useState<AdminServiceItem[]>([]);
   const [catalog, setCatalog] = useState<AwxTemplateCatalog | null>(null);
+  const [visibilityRules, setVisibilityRules] = useState<TemplateVisibilityRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -31,12 +33,14 @@ export default function AdminServicesPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [services, templates] = await Promise.all([
+      const [services, templates, visibility] = await Promise.all([
         fetchAdminServices(),
         fetchAwxTemplates(),
+        fetchTemplateVisibility(),
       ]);
       setItems(services.items);
       setCatalog(templates);
+      setVisibilityRules(visibility.rules);
       setError(null);
     } catch {
       setError(t('data_error_title'));
@@ -125,6 +129,22 @@ export default function AdminServicesPage() {
             </div>
           ))}
         </div>
+
+        <section className="space-y-3">
+          <ProjectTemplateVisibility
+            templates={catalog?.templates || []}
+            rules={visibilityRules}
+            readOnly={readOnly || !catalog?.available}
+            onSaved={(rule) => setVisibilityRules((current) => [
+              ...current.filter((item) => item.templateId !== rule.templateId),
+              rule,
+            ])}
+            onDeleted={(templateId) => {
+              setVisibilityRules((current) => current.filter((rule) => rule.templateId !== templateId));
+            }}
+            onNotify={notify}
+          />
+        </section>
 
         <section className="space-y-3">
           <div className="flex flex-col lg:flex-row lg:items-center gap-2.5">

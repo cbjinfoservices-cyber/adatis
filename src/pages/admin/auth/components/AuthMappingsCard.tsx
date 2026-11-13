@@ -19,6 +19,7 @@ const ROLE_STYLES: Record<PortalRole, string> = {
   admin: 'bg-primary-500/15 text-primary-700 dark:text-primary-300',
   approver: 'bg-accent-100 text-accent-900',
   requester: 'bg-secondary-100 text-secondary-900',
+  project_manager: 'bg-violet-100 text-violet-900',
 };
 
 export default function AuthMappingsCard({

@@ -3,7 +3,7 @@
 # ASP Automation Service Portal — installation depuis le package de production
 #
 #   cp config.env.example config.env    # renseigner domaine, HTTPS, Ascender…
-#   bash install.sh                     # charge les images puis déploie
+#   bash install.sh                     # construit/charge/réutilise les images puis déploie
 #   bash install.sh --no-ingress        # options transmises à deploy/deploy.sh
 #
 # VM Linux vierge : sans cluster accessible, k3s (embarqué, hors ligne, avec
@@ -57,7 +57,7 @@ MANIFEST_FILES="$(awk '{p = substr($0, 67); sub(/^\*/, "", p); sub(/^\.\//, "", 
 PACKAGE_FILES="$(cd "${PKG_DIR}" && find . -type f ! -path ./SHA256SUMS ! -path ./config.env -print | sed 's#^\./##' | sort)"
 [ "${MANIFEST_FILES}" = "${PACKAGE_FILES}" ] || fail "SHA256SUMS : fichiers manquants, surnuméraires ou dupliqués"
 (cd "${PKG_DIR}" && sha256sum --quiet -c SHA256SUMS) || fail "SHA256SUMS : package altéré ou incomplet"
-for required in VERSION config.env.example images/images.tar.gz install.sh deploy/deploy.sh; do
+for required in VERSION config.env.example install.sh deploy/deploy.sh; do
   [ -f "${PKG_DIR}/${required}" ] || fail "Fichier requis absent : ${required}"
 done
 
@@ -80,26 +80,83 @@ read_key_value_file() {
 }
 
 read_key_value_file "${PKG_DIR}/VERSION" \
-  "TAG,API_IMAGE,WEB_IMAGE,POSTGRES_IMAGE,BUSYBOX_IMAGE,K3S_VERSION,K3S_ARCH,K3S_BINARY,THIRD_PARTY_IMAGES,BASE_PATH,PLATFORM,BUILT_AT,COMMIT"
+  "TAG,API_IMAGE,WEB_IMAGE,POSTGRES_IMAGE,BUSYBOX_IMAGE,K3S_VERSION,K3S_ARCH,K3S_BINARY,K3S_SOURCE_IMAGES_SHA256,THIRD_PARTY_IMAGES,BASE_PATH,PLATFORM,INCLUDE_IMAGES,BUILD_FROM_SOURCE,BUILT_AT,COMMIT"
 PACKAGE_TAG="${TAG:-}"
 [ -n "${PACKAGE_TAG}" ] || fail "TAG absent de VERSION"
-[ -n "${API_IMAGE:-}" ] && [ -n "${WEB_IMAGE:-}" ] \
-  || fail "API_IMAGE ou WEB_IMAGE absent de VERSION"
-[ -n "${POSTGRES_IMAGE:-}" ] && [ -n "${BUSYBOX_IMAGE:-}" ] \
-  || fail "POSTGRES_IMAGE ou BUSYBOX_IMAGE absent de VERSION"
+INCLUDE_IMAGES="${INCLUDE_IMAGES:-true}"
+case "${INCLUDE_IMAGES}" in true|false) ;; *) fail "INCLUDE_IMAGES invalide dans VERSION" ;; esac
+BUILD_FROM_SOURCE="${BUILD_FROM_SOURCE:-false}"
+case "${BUILD_FROM_SOURCE}" in true|false) ;; *) fail "BUILD_FROM_SOURCE invalide dans VERSION" ;; esac
+if [ "${BUILD_FROM_SOURCE}" = true ]; then
+  [ "${INCLUDE_IMAGES}" = false ] || fail "BUILD_FROM_SOURCE requiert INCLUDE_IMAGES=false"
+  [ -f "${PKG_DIR}/Dockerfile" ] && [ -f "${PKG_DIR}/api/Dockerfile" ] \
+    && [ -f "${PKG_DIR}/deploy/package/postgres.Dockerfile" ] \
+    || fail "Sources ou Dockerfiles applicatifs absents du package"
+  command -v docker >/dev/null 2>&1 || fail "docker est requis pour construire les images depuis les sources"
+  docker info --format '{{.ServerVersion}}' >/dev/null 2>&1 \
+    || fail "Docker ne repond pas : demarrer Docker avant l'installation"
+fi
+PACKAGE_API_IMAGE="${API_IMAGE:-}"
+PACKAGE_WEB_IMAGE="${WEB_IMAGE:-}"
+PACKAGE_POSTGRES_IMAGE="${POSTGRES_IMAGE:-}"
+PACKAGE_BUSYBOX_IMAGE="${BUSYBOX_IMAGE:-}"
+if [ "${INCLUDE_IMAGES}" = true ]; then
+  [ -n "${API_IMAGE:-}" ] && [ -n "${WEB_IMAGE:-}" ] \
+    || fail "API_IMAGE ou WEB_IMAGE absent de VERSION"
+  [ -n "${POSTGRES_IMAGE:-}" ] && [ -n "${BUSYBOX_IMAGE:-}" ] \
+    || fail "POSTGRES_IMAGE ou BUSYBOX_IMAGE absent de VERSION"
+  [ -s "${PKG_DIR}/images/images.tar.gz" ] || fail "Archive d'images absente du package"
+else
+  [ ! -e "${PKG_DIR}/images/images.tar.gz" ] || fail "Archive d'images inattendue dans le package sans images"
+  [ -z "${K3S_BINARY:-}" ] || fail "Un package sans images ne peut pas embarquer k3s"
+fi
+if [ -n "${K3S_BINARY:-}" ]; then
+  [ "${K3S_VERSION:-}" = "v1.36.6+k3s1" ] \
+    || fail "Version k3s non validée pour ce bundle d'images personnalisé"
+  [[ "${K3S_SOURCE_IMAGES_SHA256:-}" =~ ^[0-9a-f]{64}$ ]] \
+    || fail "K3S_SOURCE_IMAGES_SHA256 absent ou invalide dans VERSION"
+  [ -f "${PKG_DIR}/k3s/k3s-airgap-images-${K3S_ARCH}.tar.gz" ] \
+    || fail "Archive d'images k3s personnalisée absente"
+  [ -f "${PKG_DIR}/k3s/K3S-IMAGE-OVERRIDES.txt" ] \
+    || fail "Provenance des images k3s absente"
+elif [ -n "${K3S_SOURCE_IMAGES_SHA256:-}" ]; then
+  fail "K3S_SOURCE_IMAGES_SHA256 doit être vide si k3s n'est pas inclus"
+fi
 if [ -f "${PKG_DIR}/config.env" ]; then
   log "Configuration : config.env"
   chmod 600 "${PKG_DIR}/config.env" || fail "Impossible de protéger config.env (droits 600 requis)"
   read_key_value_file "${PKG_DIR}/config.env" \
-    "KUBECONFIG,K3S_INSTALL,K3S_EXTRA_ARGS,REGISTRY,NAMESPACE,DOMAIN,LETSENCRYPT_EMAIL,CERT_MANAGER_ISSUER,TLS_CERT_FILE,TLS_KEY_FILE,TLS_SELF_SIGNED,AWX_BASE_URL,AWX_CLIENT_ID,AWX_CLIENT_SECRET,AWX_ADMIN_USERS,ASCENDER_CA_FILE,SESSION_IDLE_MINUTES,SESSION_TTL_HOURS,INGRESS_NAMESPACE,API_EGRESS_CIDR,CONNECTOR_ALLOWED_HOSTS,SMTP_HOST,SMTP_PORT,SMTP_SECURE,SMTP_USER,SMTP_PASSWORD,ALERT_EMAIL_TO,ALERT_EMAIL_FROM,PORTAL_URL,AWX_REDIRECT_URI,AWX_SCOPES,TOKEN_ENCRYPTION_KEY,TOKEN_ENCRYPTION_KEYS_PREVIOUS,FORCE_DB_PASSWORD,ALLOWED_ORIGINS,API_URL,BASE_PATH,DB_NAME,DB_USER,RESEND_API_KEY,ALLOW_EXTERNAL_MAIL"
+    "KUBECONFIG,K3S_INSTALL,K3S_EXTRA_ARGS,REGISTRY,API_IMAGE,WEB_IMAGE,POSTGRES_IMAGE,BUSYBOX_IMAGE,NAMESPACE,DOMAIN,LETSENCRYPT_EMAIL,CERT_MANAGER_ISSUER,TLS_CERT_FILE,TLS_KEY_FILE,TLS_SELF_SIGNED,AWX_BASE_URL,AWX_CLIENT_ID,AWX_CLIENT_SECRET,AWX_ADMIN_USERS,ASCENDER_CA_FILE,SESSION_IDLE_MINUTES,SESSION_TTL_HOURS,INGRESS_NAMESPACE,API_EGRESS_CIDR,CONNECTOR_ALLOWED_HOSTS,SMTP_HOST,SMTP_PORT,SMTP_SECURE,SMTP_USER,SMTP_PASSWORD,ALERT_EMAIL_TO,ALERT_EMAIL_FROM,PORTAL_URL,AWX_REDIRECT_URI,AWX_SCOPES,TOKEN_ENCRYPTION_KEY,TOKEN_ENCRYPTION_KEYS_PREVIOUS,FORCE_DB_PASSWORD,ALLOWED_ORIGINS,API_URL,BASE_PATH,DB_NAME,DB_USER,RESEND_API_KEY,ALLOW_EXTERNAL_MAIL"
 else
   fail "config.env requis : copier config.env.example et renseigner les paramètres de production"
 fi
 # La version vient du package ; config.env ne peut pas la remplacer.
 TAG="${PACKAGE_TAG}"
+image_ref() {
+  local name="$1"
+  if [ -n "${REGISTRY:-}" ]; then printf '%s/%s:%s' "${REGISTRY%/}" "${name}" "${TAG}"
+  else printf '%s:%s' "${name}" "${TAG}"
+  fi
+}
+if [ "${INCLUDE_IMAGES}" = false ]; then
+  if [ -n "${REGISTRY:-}" ]; then
+    API_IMAGE="${API_IMAGE:-$(image_ref asp-api)}"
+    WEB_IMAGE="${WEB_IMAGE:-$(image_ref asp-web)}"
+    POSTGRES_IMAGE="${POSTGRES_IMAGE:-$(image_ref asp-postgres)}"
+  else
+    API_IMAGE="${API_IMAGE:-${PACKAGE_API_IMAGE:-$(image_ref asp-api)}}"
+    WEB_IMAGE="${WEB_IMAGE:-${PACKAGE_WEB_IMAGE:-$(image_ref asp-web)}}"
+    POSTGRES_IMAGE="${POSTGRES_IMAGE:-${PACKAGE_POSTGRES_IMAGE:-$(image_ref asp-postgres)}}"
+  fi
+  BUSYBOX_IMAGE="${BUSYBOX_IMAGE:-${PACKAGE_BUSYBOX_IMAGE:-busybox:1.36.1@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662}}"
+fi
 [ -n "${API_EGRESS_CIDR:-}" ] || fail "API_EGRESS_CIDR doit limiter l'egress aux réseaux Ascender, SMTP et connecteurs"
 case "${API_EGRESS_CIDR}" in 0.0.0.0/0|::/0) fail "API_EGRESS_CIDR ne peut pas être ouvert à tous les réseaux en production" ;; esac
-ok "Package ${TAG} intègre"
+if [ "${BUILD_FROM_SOURCE}" = true ]; then
+  ok "Package ${TAG} intègre (construction depuis les sources)"
+else
+  ok "Package ${TAG} intègre"
+fi
 
 # ---------------------------------------------------------------------------
 # Cluster k3s (VM vierge)
@@ -128,7 +185,7 @@ if [ "${K3S_INSTALL}" = true ]; then
   log "Installation de k3s ${K3S_VERSION} (hors ligne)"
   as_root install -m 755 "${PKG_DIR}/k3s/${K3S_BINARY}" /usr/local/bin/k3s
   as_root mkdir -p /var/lib/rancher/k3s/agent/images
-  as_root cp "${PKG_DIR}/k3s/k3s-airgap-images-${K3S_ARCH}.tar.zst" /var/lib/rancher/k3s/agent/images/
+  as_root cp "${PKG_DIR}/k3s/k3s-airgap-images-${K3S_ARCH}.tar.gz" /var/lib/rancher/k3s/agent/images/
   # Traefik : adresse IP réelle des clients conservée (journal d'audit,
   # limites par adresse) au lieu de celle du nœud.
   as_root mkdir -p /var/lib/rancher/k3s/server/manifests
@@ -217,18 +274,22 @@ fi
 ok "Cluster : $(kubectl config current-context)"
 
 # ---------------------------------------------------------------------------
-# Chargement des images
+# Chargement ou résolution des images
 # ---------------------------------------------------------------------------
 REGISTRY="${REGISTRY:-}"
-if [ -n "${REGISTRY}" ]; then
+if [ "${INCLUDE_IMAGES}" = false ]; then
+  log "Images fournies par l'environnement : ${API_IMAGE}, ${WEB_IMAGE}, ${POSTGRES_IMAGE}, ${BUSYBOX_IMAGE}"
+elif [ -n "${REGISTRY}" ]; then
   command -v docker >/dev/null 2>&1 || fail "docker est requis pour pousser vers ${REGISTRY}"
   log "Chargement des images dans Docker"
   gunzip -c "${ARCHIVE}" | docker load >/dev/null
-  for image in "${API_IMAGE}" "${WEB_IMAGE}"; do
+  for image in "${API_IMAGE}" "${WEB_IMAGE}" "${POSTGRES_IMAGE}"; do
     log "Push de ${REGISTRY}/${image}"
     docker tag "${image}" "${REGISTRY}/${image}"
     docker push "${REGISTRY}/${image}"
   done
+  POSTGRES_IMAGE="${REGISTRY}/asp-postgres:${TAG}"
+  export POSTGRES_IMAGE
   warn "${THIRD_PARTY_IMAGES} : récupérées depuis Docker Hub par le cluster"
 elif command -v k3s >/dev/null 2>&1; then
   log "Import des images dans k3s (containerd)"
@@ -265,7 +326,7 @@ fi
 # ---------------------------------------------------------------------------
 # Déploiement
 # ---------------------------------------------------------------------------
-export TAG REGISTRY
+export TAG REGISTRY API_IMAGE WEB_IMAGE POSTGRES_IMAGE BUSYBOX_IMAGE
 # Images tierces importées depuis le package (intégrité vérifiée par
 # SHA256SUMS) : référencées par leur tag exact. Avec REGISTRY, le cluster les
 # récupère sur Docker Hub, épinglées par empreinte (valeurs de deploy.sh).
@@ -273,4 +334,8 @@ if [ -z "${REGISTRY}" ]; then
   export POSTGRES_IMAGE BUSYBOX_IMAGE
 fi
 # Sans exec : le trap doit supprimer les fichiers temporaires à la fin.
-bash "${PKG_DIR}/deploy/deploy.sh" --skip-build "$@"
+if [ "${BUILD_FROM_SOURCE}" = true ]; then
+  bash "${PKG_DIR}/deploy/deploy.sh" "$@"
+else
+  bash "${PKG_DIR}/deploy/deploy.sh" --skip-build "$@"
+fi

@@ -1,7 +1,7 @@
 # Images de base épinglées par empreinte (digest) : un tag republié ne peut
 # pas changer le contenu construit. Mise à jour : voir deploy/README.md.
-ARG NODE_IMAGE=node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53
-ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:1.30.6-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03
+ARG NODE_IMAGE=node:24.22.1-alpine@sha256:1200d815de24f8dcca745fbf7651d166034a35adbcad8860a8538ffff44f1420
+ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:1.30.6-alpine@sha256:e2a8fca8aa356d66159aaf8a877a9c126773635adf210503eefaaeaffeed6ad7
 
 # --- Étape 1 : build du SPA ---
 FROM ${NODE_IMAGE} AS build

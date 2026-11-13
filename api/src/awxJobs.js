@@ -181,7 +181,15 @@ const launchForRequest = async ({
 
   // RBAC AWX : on refuse un modèle que l'utilisateur n'a pas le droit de lancer.
   const access = await awxRbac.accessForSession(session);
-  if (!awxRbac.allowed(access, template.kind, template.id)) {
+  if (!access) {
+    await markFailed(request.id, 'awx_access_unavailable', failure);
+    return { error: 'awx_access_unavailable' };
+  }
+  const rules = await awxRbac.visibilityRules();
+  if (
+    !awxRbac.allowed(access, template.kind, template.id)
+    || !awxRbac.allowedByPortalRole(rules, access, user, template.kind, template.id)
+  ) {
     await markFailed(request.id, 'rbac_forbidden', failure);
     return { skipped: 'rbac_forbidden' };
   }

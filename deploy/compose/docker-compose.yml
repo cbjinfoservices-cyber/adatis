@@ -18,7 +18,12 @@ x-hardened: &hardened
 
 services:
   postgres:
-    image: postgres:16.15-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    image: asp-postgres:local
+    build:
+      context: ../..
+      dockerfile: deploy/package/postgres.Dockerfile
+      pull: true
+      no_cache: true
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME:-asp_portal}
@@ -37,7 +42,12 @@ services:
   # Migrations SQL idempotentes (équivalent du Job asp-db-migrate) : exécutées
   # à chaque `up`, seules les nouvelles sont appliquées.
   migrate:
-    image: postgres:16.15-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    image: asp-postgres:local
+    build:
+      context: ../..
+      dockerfile: deploy/package/postgres.Dockerfile
+      pull: true
+      no_cache: true
     restart: "no"
     command: ["/bin/sh", "/sql/migrate.sh"]
     environment:
@@ -57,6 +67,8 @@ services:
     <<: *hardened
     build:
       context: ../../api
+      pull: true
+      no_cache: true
     image: asp-api:local
     environment:
       NODE_ENV: ${NODE_ENV:-development}
@@ -96,6 +108,8 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
+      pull: true
+      no_cache: true
       args:
         BASE_PATH: /
     image: asp-web:local
@@ -107,7 +121,12 @@ services:
   # Point d'entrée unique : /api -> API, le reste -> SPA (même origine, comme l'Ingress).
   gateway:
     <<: *hardened
-    image: nginxinc/nginx-unprivileged:1.30.6-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03
+    image: asp-gateway:local
+    build:
+      context: ../..
+      dockerfile: deploy/compose/Dockerfile.gateway
+      pull: true
+      no_cache: true
     ports:
       - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:8080"
     volumes:

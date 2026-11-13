@@ -52,11 +52,18 @@ cluster. Le mode sans authentification n'existe qu'en développement local
 | Rôle | Périmètre |
 |---|---|
 | Demandeur | ses propres demandes |
+| Chef de projet | ses propres demandes ; peut voir les modèles autorisés pour son rôle |
 | Approbateur | les demandes de **son** tenant ; sans tenant, uniquement les siennes |
 | Administrateur | tout |
 
 - Le rôle est recalculé à chaque connexion (superutilisateur Ascender, ou
   mappings organisation / équipe).
+- Une règle facultative par job template de projet limite sa visibilité aux
+  rôles choisis dans Administration → Services. Sans règle, le portail conserve
+  le filtre AWX existant ; une règle ne peut jamais accorder un droit absent
+  dans AWX. Le droit AWX de lancement est revérifié à la demande et au lancement.
+- Si le portail ne peut pas lire les droits AWX d'une session, le catalogue et
+  la commande échouent de manière fermée (`503`).
 - Une décision d'approbation hors du périmètre de l'approbateur répond 404,
   comme une lecture.
 - Personne n'approuve sa propre demande.

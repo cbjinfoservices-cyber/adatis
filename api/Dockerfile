@@ -1,6 +1,6 @@
 # Images de base épinglées par empreinte (digest) : un tag republié ne peut
 # pas changer le contenu construit. Mise à jour : voir deploy/README.md.
-ARG NODE_IMAGE=node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53
+ARG NODE_IMAGE=node:24.22.1-alpine@sha256:1200d815de24f8dcca745fbf7651d166034a35adbcad8860a8538ffff44f1420
 
 # --- Étape 1 : dépendances de production ---
 FROM ${NODE_IMAGE} AS deps

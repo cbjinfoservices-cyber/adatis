@@ -9,6 +9,10 @@ cp env.example .env          # renseigner au minimum DB_PASSWORD
 docker compose up -d --build
 ```
 
+Les images API, PostgreSQL et gateway sont reconstruites sans cache et avec
+récupération des images de base épinglées, afin d'intégrer les mises à jour
+Alpine disponibles au moment du build.
+
 Portail : http://localhost:8080 (`HTTP_PORT`). L'écoute est limitée à
 `127.0.0.1` (`HTTP_BIND`).
 

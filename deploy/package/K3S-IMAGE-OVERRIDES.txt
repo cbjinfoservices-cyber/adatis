@@ -1,0 +1,18 @@
+The bundled K3s air-gap image archive is derived from the official release archive.
+The K3s binary and install.sh remain the official, checksum-verified release files.
+
+The following image references retain the tags expected by K3s, but their contents
+are replaced by these upstream sources:
+
+- rancher/klipper-helm:v0.13.3-build20261021
+  <- rancher/klipper-helm@sha256:e2289066485f0bd74730401d3fbd91f6918c5e5bd100943aa743b6f39dfc3019
+- rancher/klipper-lb:v0.4.17
+  <- rancher/klipper-lb@sha256:fb8981e8c235a6e276dc94033948e60f1a82219c579629b957dfa1d640b64a72
+- rancher/local-path-provisioner:v0.0.37
+  <- local-path-provisioner source commit 49b2be8e26d6d34c9afaa21fa33108d2e82f8955,
+     rebuilt with Go 1.26.10, klauspost/compress 1.18.7,
+     golang.org/x/net 0.62.0, and golang.org/x/text 0.43.0.
+
+These are maintained ASP overrides, not an unmodified Rancher/K3s air-gap bundle.
+The K3s image source archive SHA-256 is recorded in VERSION. The final package
+SHA256SUMS and Cosign signature cover the derived archive.

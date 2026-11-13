@@ -27,7 +27,7 @@ const {
 
 const router = express.Router();
 
-const ROLE_VALUES = ['admin', 'approver', 'requester'];
+const ROLE_VALUES = ['admin', 'approver', 'requester', 'project_manager'];
 
 const safeNext = (value) => {
   const raw = String(value || '');

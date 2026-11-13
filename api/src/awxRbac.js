@@ -1,5 +1,6 @@
 const awx = require('./awx');
 const { ensureAccessToken } = require('./auth');
+const { q } = require('./db');
 
 /**
  * Droits AWX de l'utilisateur connecté (RBAC).
@@ -8,8 +9,8 @@ const { ensureAccessToken } = require('./auth');
  * par les permissions AWX. Le résultat est mis en cache une minute pour éviter
  * un appel par service dans le catalogue.
  *
- * En cas d'incident AWX (timeout, 5xx), on ne filtre rien : mieux vaut afficher
- * un service de trop qu'un catalogue vide.
+ * Les droits sont mis en cache une minute. Une indisponibilité AWX ne donne
+ * aucun droit de lancement : les appels protégés échouent de manière fermée.
  */
 
 const TTL_MS = 60 * 1000;
@@ -37,10 +38,9 @@ const accessForSession = async (session) => {
 
 const allowed = (access, kind, templateId) => {
   const id = Number(templateId);
-  if (!access) return true;
-  if (!Number.isInteger(id) || id <= 0) return true;
+  if (!access || !Number.isInteger(id) || id <= 0) return false;
   const set = kind === 'workflow' ? access.workflows : access.templates;
-  if (!set) return true;
+  if (!set) return false;
   return set.has(id);
 };
 
@@ -55,11 +55,48 @@ const projectOf = (access, template) => {
   return access.projectOfTemplate.get(Number(template.id)) || null;
 };
 
+const visibilityRules = async () => {
+  const { rows } = await q(
+    `SELECT template_kind, template_id, project_id, allowed_roles
+       FROM awx_template_visibility`,
+  );
+  return new Map(rows.map((row) => [
+    `${row.template_kind}:${row.template_id}`,
+    {
+      projectId: Number(row.project_id),
+      roles: row.allowed_roles || [],
+    },
+  ]));
+};
+
+const allowedByPortalRole = (rules, access, user, kind, templateId) => {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  const rule = rules.get(`${kind}:${Number(templateId)}`);
+  if (!rule) return true;
+  const project = projectOf(access, { kind, id: templateId });
+  return Boolean(project && project.id === rule.projectId && rule.roles.includes(user.role));
+};
+
+const allowedForUser = async (session, user, kind, templateId) => {
+  if (!session) return true;
+  const access = await accessForSession(session);
+  if (!access) {
+    const error = /** @type {import('./types').HttpError} */ (new Error('Droits Ascender illisibles pour la session'));
+    error.status = 503;
+    error.code = 'awx_access_unavailable';
+    throw error;
+  }
+  if (!allowed(access, kind, templateId)) return false;
+  const rules = await visibilityRules();
+  return allowedByPortalRole(rules, access, user, kind, templateId);
+};
+
 const forget = (session) => {
   const key = cacheKey(session);
   if (key) cache.delete(key);
 };
 
 module.exports = {
-  accessForSession, allowed, projectOf, forget,
+  accessForSession, allowed, projectOf, visibilityRules, allowedByPortalRole, allowedForUser, forget,
 };

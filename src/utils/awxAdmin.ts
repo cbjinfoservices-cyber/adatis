@@ -1,5 +1,6 @@
 import { api } from '@/utils/api';
 import type { I18nText } from '@/types/catalog';
+import type { PortalRole } from '@/utils/auth';
 
 export type AwxTemplateKind = 'none' | 'job' | 'workflow';
 
@@ -9,6 +10,17 @@ export type AwxTemplateOption = {
   name: string;
   description?: string;
   organization?: string;
+  projectId?: number;
+  projectName?: string;
+};
+
+export type TemplateVisibilityRule = {
+  kind: 'job';
+  templateId: number;
+  projectId: number;
+  projectName: string;
+  templateName: string;
+  roles: Exclude<PortalRole, 'admin'>[];
 };
 
 export type AwxTemplateCatalog = {
@@ -53,6 +65,17 @@ export type AwxWorkflowPayload = {
 export const fetchAdminServices = () => api.get<{ items: AdminServiceItem[] }>('/admin/services');
 
 export const fetchAwxTemplates = () => api.get<AwxTemplateCatalog>('/admin/awx/templates');
+
+export const fetchTemplateVisibility = () => api.get<{ rules: TemplateVisibilityRule[] }>('/admin/template-visibility');
+
+export const saveTemplateVisibility = (
+  templateId: number,
+  body: { projectId: number; roles: TemplateVisibilityRule['roles'] },
+) => api.patch<TemplateVisibilityRule>(`/admin/template-visibility/job/${templateId}`, body);
+
+export const deleteTemplateVisibility = (templateId: number) => (
+  api.delete<null>(`/admin/template-visibility/job/${templateId}`)
+);
 
 export const saveServiceTemplate = (id: string, body: { kind: AwxTemplateKind; templateId?: number | null }) => (
   api.patch<AdminServiceItem>(`/admin/services/${id}`, body)

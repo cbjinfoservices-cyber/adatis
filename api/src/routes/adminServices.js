@@ -15,6 +15,7 @@ const { authMode, ensureAccessToken } = require('../auth');
  */
 
 const router = express.Router();
+const VISIBILITY_ROLES = ['approver', 'requester', 'project_manager'];
 
 const SERVICE_SELECT = `
   SELECT s.id, s.name_fr, s.name_en, s.icon, s.category_id, s.approval,
@@ -146,6 +147,101 @@ router.get('/admin/awx/templates', async (req, res, next) => {
         templates: [], workflows: [], available: false, reason: 'awx_unreachable',
       });
     }
+  } catch (err) { return next(err); }
+});
+
+router.get('/admin/template-visibility', async (_req, res, next) => {
+  try {
+    const { rows } = await q(
+      `SELECT template_kind, template_id, project_id, project_name, template_name, allowed_roles
+         FROM awx_template_visibility
+        ORDER BY project_name, template_name`,
+    );
+    return res.json({
+      rules: rows.map((row) => ({
+        kind: row.template_kind,
+        templateId: Number(row.template_id),
+        projectId: Number(row.project_id),
+        projectName: row.project_name,
+        templateName: row.template_name,
+        roles: row.allowed_roles || [],
+      })),
+    });
+  } catch (err) { return next(err); }
+});
+
+/**
+ * Règle facultative : rôles portail autorisés pour un job template d'un projet.
+ * Sans règle, les droits Ascender restent le seul filtre. Une liste vide masque
+ * le modèle à tous les rôles non-administrateurs.
+ */
+router.patch('/admin/template-visibility/:kind/:templateId', async (req, res, next) => {
+  try {
+    const { kind } = req.params;
+    const templateId = Number(req.params.templateId);
+    const projectId = Number(req.body?.projectId);
+    const roles = req.body?.roles;
+    if (kind !== 'job') return res.status(400).json({ error: 'invalid_template_kind' });
+    if (!Number.isInteger(templateId) || templateId <= 0 || !Number.isInteger(projectId) || projectId <= 0) {
+      return res.status(400).json({ error: 'invalid_template_or_project' });
+    }
+    if (!Array.isArray(roles) || roles.some((role) => !VISIBILITY_ROLES.includes(role))) {
+      return res.status(400).json({ error: 'invalid_roles' });
+    }
+
+    const session = await awxSession(req);
+    if (!session.token) return res.status(409).json({ error: session.reason });
+    let catalog;
+    try {
+      catalog = await awx.listTemplatesDetailed(session.token);
+    } catch (err) {
+      console.error('[awx] modèles illisibles :', err.message);
+      return res.status(502).json({ error: 'awx_unreachable' });
+    }
+    const model = catalog.templates.find((item) => Number(item.id) === templateId);
+    if (!model || Number(model.projectId) !== projectId) {
+      return res.status(403).json({ error: 'template_project_forbidden' });
+    }
+
+    const cleanRoles = [...new Set(roles)];
+    const { rows } = await q(
+      `INSERT INTO awx_template_visibility
+         (template_kind, template_id, project_id, project_name, template_name, allowed_roles)
+       VALUES ('job', $1, $2, $3, $4, $5)
+       ON CONFLICT (template_kind, template_id) DO UPDATE
+         SET project_id = EXCLUDED.project_id,
+             project_name = EXCLUDED.project_name,
+             template_name = EXCLUDED.template_name,
+             allowed_roles = EXCLUDED.allowed_roles,
+             updated_at = now()
+       RETURNING template_kind, template_id, project_id, project_name, template_name, allowed_roles`,
+      [templateId, projectId, String(model.projectName || '').slice(0, 200), String(model.name || '').slice(0, 200), cleanRoles],
+    );
+    awxRbac.forget(req.auth?.session);
+    const row = rows[0];
+    return res.json({
+      kind: row.template_kind,
+      templateId: Number(row.template_id),
+      projectId: Number(row.project_id),
+      projectName: row.project_name,
+      templateName: row.template_name,
+      roles: row.allowed_roles || [],
+    });
+  } catch (err) { return next(err); }
+});
+
+router.delete('/admin/template-visibility/:kind/:templateId', async (req, res, next) => {
+  try {
+    const templateId = Number(req.params.templateId);
+    if (req.params.kind !== 'job') return res.status(400).json({ error: 'invalid_template_kind' });
+    if (!Number.isInteger(templateId) || templateId <= 0) return res.status(400).json({ error: 'invalid_template_id' });
+    const { rowCount } = await q(
+      'DELETE FROM awx_template_visibility WHERE template_kind = $1 AND template_id = $2',
+      ['job', templateId],
+    );
+    if (!rowCount) return res.status(404).json({ error: 'visibility_rule_not_found' });
+    awxRbac.forget(req.auth?.session);
+    return res.status(204).end();
   } catch (err) { return next(err); }
 });
 

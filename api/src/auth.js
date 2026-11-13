@@ -132,7 +132,7 @@ const initialsOf = (name) => String(name || '')
   .map((part) => part[0].toUpperCase())
   .join('') || 'AW';
 
-const roleRank = { requester: 0, approver: 1, admin: 2 };
+const roleRank = { requester: 0, project_manager: 1, approver: 2, admin: 3 };
 
 const normalize = (value) => String(value || '').trim().toLowerCase();
 

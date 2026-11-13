@@ -4,7 +4,7 @@ Briques déployées dans le cluster, dans le namespace `asp-portal` :
 
 | Brique | Ressource | Détail |
 | --- | --- | --- |
-| `postgres` | StatefulSet + PVC 10 Gi | `postgres:16.15-alpine`, TLS obligatoire |
+| `postgres` | StatefulSet + PVC 10 Gi | image PostgreSQL durcie, TLS obligatoire |
 | `asp-db-migrate` | Job batch | applique les scripts SQL **avant** le démarrage de l'API |
 | `asp-api` | Deployment (2 réplicas) | Node 24 + Express, **seul client de PostgreSQL** |
 | `asp-web` | Deployment (2 réplicas) | SPA compilé servi par nginx sans root |
@@ -258,7 +258,8 @@ kubectl -n asp-portal exec deploy/asp-api -- wget -qO- localhost:8080/api/system
 | `CONNECTOR_ALLOWED_HOSTS` | vide | hôtes que le test de connecteur peut appeler (`*.domaine` accepté) ; vide = test désactivé |
 | `INGRESS_NAMESPACE` | détecté, sinon `kube-system` | namespace de Traefik, dont les pods sont autorisés par les NetworkPolicy |
 | `API_EGRESS_CIDR` | requis hors dev | réseau joignable par l'API (Ascender, SMTP, connecteurs) ; `0.0.0.0/0` est refusé hors dev |
-| `POSTGRES_IMAGE` / `BUSYBOX_IMAGE` | épinglées par empreinte | images tierces |
+| `POSTGRES_IMAGE` | construite depuis PostgreSQL Alpine avec paquets corrigés | image applicative |
+| `BUSYBOX_IMAGE` | épinglée par empreinte | image tierce |
 
 ## 3bis. Authentification SSO Ascender (AWX)
 

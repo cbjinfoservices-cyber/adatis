@@ -15,10 +15,23 @@ const router = express.Router();
  * session AWX (auth désactivée ou AWX injoignable) : aucun filtre, aucun projet.
  */
 const visibleServices = async (req, rows) => {
+  if (!req.auth?.session) {
+    return rows.map((row) => ({ row, project: null }));
+  }
   const access = req.auth?.session ? await awxRbac.accessForSession(req.auth.session) : null;
+  if (!access) {
+    const error = /** @type {import('../types').HttpError} */ (new Error('Droits Ascender illisibles pour la session'));
+    error.status = 503;
+    error.code = 'awx_access_unavailable';
+    throw error;
+  }
+  const rules = await awxRbac.visibilityRules();
   return rows
     .map((row) => ({ row, template: awxJobs.templateForService(row) }))
-    .filter(({ template }) => !access || !template || awxRbac.allowed(access, template.kind, template.id))
+    .filter(({ template }) => !template || (
+      awxRbac.allowed(access, template.kind, template.id)
+      && awxRbac.allowedByPortalRole(rules, access, req.auth.user, template.kind, template.id)
+    ))
     .map(({ row, template }) => ({ row, project: awxRbac.projectOf(access, template) }));
 };
 

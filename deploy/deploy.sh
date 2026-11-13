@@ -53,8 +53,8 @@
 #   SMTP_USER / SMTP_PASSWORD            identifiants SMTP (secret asp-mail)
 #   RESEND_API_KEY      service externe Resend : refusé sauf ALLOW_EXTERNAL_MAIL=true
 #
-#   Images tierces (épinglées par empreinte ; install.sh les remplace par le tag importé) :
-#   POSTGRES_IMAGE / BUSYBOX_IMAGE
+#   API_IMAGE / WEB_IMAGE / POSTGRES_IMAGE / BUSYBOX_IMAGE : références d'images
+#                       optionnelles (sinon dérivées de REGISTRY et TAG)
 # =============================================================================
 set -euo pipefail
 
@@ -97,7 +97,6 @@ TOKEN_ENCRYPTION_KEYS_PREVIOUS="${TOKEN_ENCRYPTION_KEYS_PREVIOUS:-}"
 CONNECTOR_ALLOWED_HOSTS="${CONNECTOR_ALLOWED_HOSTS:-}"
 INGRESS_NAMESPACE="${INGRESS_NAMESPACE:-}"
 API_EGRESS_CIDR="${API_EGRESS_CIDR:-0.0.0.0/0}"
-POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:16.15-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab}"
 BUSYBOX_IMAGE="${BUSYBOX_IMAGE:-busybox:1.36.1@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662}"
 
 SKIP_BUILD=false
@@ -218,30 +217,38 @@ image_ref() {
   if [ -n "${REGISTRY}" ]; then echo "${REGISTRY}/${name}:${TAG}"; else echo "${name}:${TAG}"; fi
 }
 
-API_IMAGE="$(image_ref asp-api)"
-WEB_IMAGE="$(image_ref asp-web)"
+API_IMAGE="${API_IMAGE:-$(image_ref asp-api)}"
+WEB_IMAGE="${WEB_IMAGE:-$(image_ref asp-web)}"
+POSTGRES_IMAGE="${POSTGRES_IMAGE:-$(image_ref asp-postgres)}"
 
 # ---------------------------------------------------------------------------
 # 2. Build des images
 # ---------------------------------------------------------------------------
 if [ "${SKIP_BUILD}" = false ]; then
   log "Construction de l'image API (${API_IMAGE})"
-  docker build -t "${API_IMAGE}" -f "${ROOT_DIR}/api/Dockerfile" "${ROOT_DIR}/api"
+  docker build --pull --no-cache -t "${API_IMAGE}" -f "${ROOT_DIR}/api/Dockerfile" "${ROOT_DIR}/api"
 
   log "Construction de l'image frontend (${WEB_IMAGE}) — BASE_PATH=${BASE_PATH}"
   docker build \
+    --pull --no-cache \
     --build-arg "BASE_PATH=${BASE_PATH}" \
     -t "${WEB_IMAGE}" \
     -f "${ROOT_DIR}/Dockerfile" "${ROOT_DIR}"
+
+  log "Construction de l'image PostgreSQL durcie (${POSTGRES_IMAGE})"
+  docker build --pull --no-cache -t "${POSTGRES_IMAGE}" \
+    -f "${ROOT_DIR}/deploy/package/postgres.Dockerfile" "${ROOT_DIR}"
 
   if [ -n "${REGISTRY}" ]; then
     log "Push des images vers ${REGISTRY}"
     docker push "${API_IMAGE}"
     docker push "${WEB_IMAGE}"
+    docker push "${POSTGRES_IMAGE}"
   elif [ "${IS_KIND}" = true ]; then
     log "Chargement des images dans le cluster kind"
     kind load docker-image "${API_IMAGE}" --name "${CLUSTER_KIND}"
     kind load docker-image "${WEB_IMAGE}" --name "${CLUSTER_KIND}"
+    kind load docker-image "${POSTGRES_IMAGE}" --name "${CLUSTER_KIND}"
   else
     warn "Images non publiées : assure-toi que le cluster peut les récupérer (minikube image load…)"
   fi

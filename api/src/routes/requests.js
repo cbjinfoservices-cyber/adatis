@@ -148,8 +148,10 @@ router.post('/requests', async (req, res, next) => {
     // RBAC Ascender vérifié dès la commande, pas seulement au lancement.
     if (req.auth?.session && engine === 'ascender') {
       const template = awxJobs.templateForService(service);
-      const access = template ? await awxRbac.accessForSession(req.auth.session) : null;
-      if (template && !awxRbac.allowed(access, template.kind, template.id)) {
+      const allowed = template
+        ? await awxRbac.allowedForUser(req.auth.session, req.auth.user, template.kind, template.id)
+        : true;
+      if (!allowed) {
         return res.status(403).json({ error: 'service_forbidden' });
       }
     }

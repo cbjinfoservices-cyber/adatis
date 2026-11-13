@@ -7,7 +7,7 @@ export interface SessionUser {
   name: string;
   initials: string;
   email: string;
-  role: 'admin' | 'approver' | 'requester' | string;
+  role: 'admin' | 'approver' | 'requester' | 'project_manager' | string;
   roleFr: string;
   roleEn: string;
   tenantId: string | null;

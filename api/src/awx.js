@@ -437,6 +437,12 @@ const collectTemplateList = async (accessToken, path, kind) => {
         name: String(tpl?.name || `#${id}`),
         description: String(tpl?.description || ''),
         organization: String(tpl?.summary_fields?.organization?.name || ''),
+        ...(kind === 'job' && Number(tpl?.summary_fields?.project?.id ?? tpl?.project) > 0
+          ? {
+            projectId: Number(tpl?.summary_fields?.project?.id ?? tpl?.project),
+            projectName: String(tpl?.summary_fields?.project?.name || ''),
+          }
+          : {}),
       });
     });
     next = payload?.next ? stripBaseUrl(payload.next) : '';
